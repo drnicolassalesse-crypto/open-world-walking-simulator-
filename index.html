@@ -225,6 +225,8 @@
   #achieve-panel h3 { font-size:16px;font-weight:300;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:12px;text-align:center;color:#FFD700; }
   .ach-row{margin-bottom:8px;} .ach-name{font-size:12px;font-weight:bold;} .ach-desc{font-size:10px;color:rgba(255,255,255,0.5);} .ach-bar{height:4px;background:rgba(255,255,255,0.1);border-radius:2px;margin-top:2px;overflow:hidden;} .ach-bar-fill{height:100%;border-radius:2px;} .ach-status{float:right;font-size:10px;}
   #achieve-banner{position:fixed;top:-50px;left:50%;transform:translateX(-50%);z-index:500;color:#FFD700;font-size:15px;font-weight:bold;background:rgba(0,0,0,0.7);backdrop-filter:blur(6px);border:1px solid rgba(255,215,0,0.4);border-radius:10px;padding:10px 24px;transition:top 0.5s ease;pointer-events:none;}
+  #stats-hud{position:fixed;bottom:20px;left:20px;z-index:50;background:rgba(0,0,0,0.45);backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:6px 12px;color:#ddd;font-size:12px;line-height:1.6;pointer-events:none;}
+  #stats-hud .stat-label{color:rgba(255,255,255,0.4);font-size:10px;text-transform:uppercase;letter-spacing:1px;margin-right:4px;}
   #zoom-vignette{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:40;display:none;background:radial-gradient(ellipse at center,transparent 50%,rgba(0,0,0,0.7) 85%,rgba(0,0,0,0.95) 100%);}
   #zoom-hud{position:fixed;top:60px;right:20px;z-index:45;display:none;color:#fff;font-size:14px;background:rgba(0,0,0,0.4);padding:4px 10px;border-radius:6px;border:1px solid rgba(255,255,255,0.15);}
   #sign-tooltip {
@@ -302,6 +304,7 @@
 <div id="achieve-panel"><h3>Achievements</h3><div id="ach-list"></div></div>
 <div id="achieve-banner"></div>
 <div id="zoom-vignette"></div><div id="zoom-hud"></div>
+<div id="stats-hud"><span class="stat-label">SEASON</span><span id="stat-season">☀️ Summer</span><br><span class="stat-label">CLOCK</span><span id="stat-time">12:00</span><br><span class="stat-label">WEATHER</span><span id="stat-weather">Clear</span></div>
 <div id="quest-log"><h3>Quest Log</h3><div id="quest-list"></div></div>
 
 <script type="importmap">
@@ -2468,7 +2471,13 @@ function animate() {
   updateDayNight(dt, pp.x, pp.z);
   if (!inVR) {
     const totalMin = Math.floor(timeOfDay * 1440);
-    hudTime.textContent = `${String(Math.floor(totalMin/60)).padStart(2,'0')}:${String(totalMin%60).padStart(2,'0')}`;
+    const timeStr = `${String(Math.floor(totalMin/60)).padStart(2,'0')}:${String(totalMin%60).padStart(2,'0')}`;
+    hudTime.textContent = timeStr;
+    // Stats HUD update
+    const seasonIcons = {spring:'🌸',summer:'☀️',autumn:'🍂',winter:'❄️'};
+    document.getElementById('stat-season').textContent = `${seasonIcons[currentSeason]||'☀️'} ${currentSeason.charAt(0).toUpperCase()+currentSeason.slice(1)}`;
+    document.getElementById('stat-time').textContent = timeStr;
+    document.getElementById('stat-weather').textContent = currentSeason==='winter'&&snowActive ? 'Snowing' : 'Clear';
   }
 
   // Weather
