@@ -573,7 +573,8 @@ function updateFireflies(dt, elapsed) {
 }
 
 // ── Weather System ──────────────────────────────────────────────────
-let weather = 'clear', weatherTimer = 60 + Math.random() * 60;
+let weather = 'clear', weatherTimer = 60 + Math.random() * 60, snowMode = false;
+let weatherFogTarget = 0, weatherSunTarget = 1;
 const rainOverlay = document.getElementById('rain-overlay');
 const lightningFlash = document.getElementById('lightning-flash');
 const hudWeather = document.getElementById('hud-weather');
@@ -589,6 +590,17 @@ const rainLines = new THREE.LineSegments(rainGeo, rainMat);
 rainLines.visible = false;
 scene.add(rainLines);
 
+// Snow particles
+const SNOW_COUNT = 20;
+const snowFlakes = [];
+const snowGeo = new THREE.BoxGeometry(0.1, 0.1, 0.1);
+const snowMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+for (let i = 0; i < SNOW_COUNT; i++) {
+  const m = new THREE.Mesh(snowGeo, snowMat);
+  m.visible = false; scene.add(m);
+  snowFlakes.push({ mesh: m, vy: 0.8 + Math.random() * 0.5 });
+}
+
 function triggerLightning() {
   lightningFlash.style.transition = 'opacity 0.05s';
   lightningFlash.style.opacity = '0.7';
@@ -599,17 +611,30 @@ function triggerLightning() {
   }, 2000);
 }
 
+function updateWeatherIcon() {
+  hudWeather.textContent = snowMode ? '❄️ Snow' : weather === 'rain' ? '🌧️ Rain' : '☀️ Clear';
+}
+function toggleSnow() {
+  snowMode = !snowMode;
+  if (snowMode && weather === 'rain') { weather = 'clear'; rainLines.visible = false; rainOverlay.style.opacity = '0'; weatherTimer = 60 + Math.random() * 60; }
+  snowFlakes.forEach(s => { s.mesh.visible = snowMode; });
+  updateWeatherIcon();
+}
 function updateWeather(dt) {
   weatherTimer -= dt;
-  if (weatherTimer <= 0) {
+  if (weatherTimer <= 0 && !snowMode) {
     weather = weather === 'clear' ? 'rain' : 'clear';
     weatherTimer = 60 + Math.random() * 60;
     rainLines.visible = weather === 'rain';
     rainOverlay.style.opacity = weather === 'rain' ? '1' : '0';
-    hudWeather.textContent = weather === 'rain' ? '🌧️ Rain' : '☀️ Clear';
+    updateWeatherIcon();
     if (weather === 'rain') triggerLightning();
   }
-  scene.fog.density = weather === 'rain' ? baseFogDensity * 2.5 : baseFogDensity;
+  // Fog & sun lerp
+  weatherFogTarget = weather === 'rain' ? 0.02 : baseFogDensity;
+  weatherSunTarget = weather === 'rain' ? 0.3 : 1;
+  scene.fog.density += (weatherFogTarget - scene.fog.density) * 2 * dt;
+  sunLight.intensity += (weatherSunTarget * 2.2 - sunLight.intensity) * 2 * dt;
   if (weather === 'rain') {
     const pp = inVR ? cameraRig.position : camera.position;
     const arr = rainGeo.attributes.position.array;
@@ -626,6 +651,17 @@ function updateWeather(dt) {
       }
     }
     rainGeo.attributes.position.needsUpdate = true;
+  }
+  // Snow update
+  if (snowMode) {
+    const sp = inVR ? cameraRig.position : camera.position;
+    for (const s of snowFlakes) {
+      s.mesh.position.y -= s.vy * dt;
+      s.mesh.rotation.x += dt; s.mesh.rotation.z += dt * 0.5;
+      if (s.mesh.position.y < getTerrainHeight(s.mesh.position.x, s.mesh.position.z)) {
+        s.mesh.position.set(sp.x + (Math.random()-0.5)*40, sp.y + 15 + Math.random()*10, sp.z + (Math.random()-0.5)*40);
+      }
+    }
   }
 }
 
@@ -1755,6 +1791,7 @@ document.addEventListener('keydown', (e) => {
   keys[e.code] = true;
   if (e.code === 'KeyE' && nearestNPC && !dialogOpen) openNPCDialog(nearestNPC);
   if (e.code === 'KeyF') tryFish();
+  if (e.code === 'KeyN') toggleSnow();
   if (e.code === 'Space' && onGround) { velocityY = 8; onGround = false; }
 });
 document.addEventListener('keyup', (e) => { keys[e.code] = false; });
