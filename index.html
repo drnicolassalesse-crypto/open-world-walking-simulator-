@@ -2185,6 +2185,51 @@ function setSeason(season) {
   document.querySelectorAll('.season-btn').forEach(b => {
     b.style.background = b.dataset.season===season ? 'rgba(100,200,100,0.6)' : 'rgba(200,50,50,0.6)';
   });
+  // Toggle snow
+  snowActive = season === 'winter';
+  if (!snowActive) { snowTargetOpacity = 0; snowGroup.visible = false; }
+  else { snowGroup.visible = true; snowTargetOpacity = 0.6; }
+}
+
+// ── Snow System (Winter Only) ───────────────────────────────────
+let snowActive = false, snowTargetOpacity = 0;
+const snowGroup = new THREE.Group(); snowGroup.visible = false; scene.add(snowGroup);
+const SNOW_COUNT = 800;
+const snowGeo = new THREE.SphereGeometry(0.06, 4, 3);
+const snowMat = new THREE.MeshStandardMaterial({ color: 0xffffff, depthWrite: false, transparent: true, opacity: 0.85 });
+const snowFlakes = [];
+for (let i = 0; i < SNOW_COUNT; i++) {
+  const s = new THREE.Mesh(snowGeo, snowMat);
+  s.position.set((Math.random()-0.5)*60, 20+Math.random()*30, (Math.random()-0.5)*60);
+  s.userData.vy = -(0.8+Math.random()*1.5);
+  s.userData.vx = (Math.random()-0.5)*0.3;
+  s.userData.vz = (Math.random()-0.5)*0.3;
+  snowGroup.add(s); snowFlakes.push(s);
+}
+// Snow ground cover
+const snowGroundMat = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false });
+const snowGround = new THREE.Mesh(new THREE.PlaneGeometry(2000, 2000), snowGroundMat);
+snowGround.rotation.x = -Math.PI/2; snowGround.position.y = 0.1; snowGround.visible = false; scene.add(snowGround);
+
+function updateSnow(dt) {
+  // Fade ground opacity
+  const diff = snowTargetOpacity - snowGroundMat.opacity;
+  if (Math.abs(diff) > 0.001) snowGroundMat.opacity += Math.sign(diff) * dt / 3;
+  snowGround.visible = snowGroundMat.opacity > 0.01;
+  if (!snowActive) return;
+  const pp = inVR ? cameraRig.position : camera.position;
+  for (const s of snowFlakes) {
+    s.position.y += s.userData.vy * dt;
+    s.position.x += s.userData.vx * dt;
+    s.position.z += s.userData.vz * dt;
+    const th = getTerrainHeight(s.position.x, s.position.z);
+    if (s.position.y < th) {
+      s.position.set(pp.x+(Math.random()-0.5)*60, pp.y+30+Math.random()*20, pp.z+(Math.random()-0.5)*60);
+      s.userData.vy = -(0.8+Math.random()*1.5);
+      s.userData.vx = (Math.random()-0.5)*0.3;
+      s.userData.vz = (Math.random()-0.5)*0.3;
+    }
+  }
 }
 
 // ── Animation loop ─────────────────────────────────────────────────
@@ -2362,6 +2407,7 @@ function animate() {
   updateMushrooms(dt);
   updateSigns();
   updateMirrorLake();
+  updateSnow(dt);
 
   // Animate water UV
   waterGeo.attributes.uv.array[0] += dt * 0.02; waterGeo.attributes.uv.array[2] += dt * 0.02;
