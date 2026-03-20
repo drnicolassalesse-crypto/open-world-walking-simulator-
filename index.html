@@ -225,6 +225,8 @@
   #achieve-panel h3 { font-size:16px;font-weight:300;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:12px;text-align:center;color:#FFD700; }
   .ach-row{margin-bottom:8px;} .ach-name{font-size:12px;font-weight:bold;} .ach-desc{font-size:10px;color:rgba(255,255,255,0.5);} .ach-bar{height:4px;background:rgba(255,255,255,0.1);border-radius:2px;margin-top:2px;overflow:hidden;} .ach-bar-fill{height:100%;border-radius:2px;} .ach-status{float:right;font-size:10px;}
   #achieve-banner{position:fixed;top:-50px;left:50%;transform:translateX(-50%);z-index:500;color:#FFD700;font-size:15px;font-weight:bold;background:rgba(0,0,0,0.7);backdrop-filter:blur(6px);border:1px solid rgba(255,215,0,0.4);border-radius:10px;padding:10px 24px;transition:top 0.5s ease;pointer-events:none;}
+  #zoom-vignette{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:40;display:none;background:radial-gradient(ellipse at center,transparent 50%,rgba(0,0,0,0.7) 85%,rgba(0,0,0,0.95) 100%);}
+  #zoom-hud{position:fixed;top:60px;right:20px;z-index:45;display:none;color:#fff;font-size:14px;background:rgba(0,0,0,0.4);padding:4px 10px;border-radius:6px;border:1px solid rgba(255,255,255,0.15);}
   #sign-tooltip {
     position: fixed; top: 25%; left: 50%; transform: translateX(-50%);
     z-index: 50; color: #fff; font-size: 14px;
@@ -298,6 +300,7 @@
 <div id="sign-tooltip"></div>
 <div id="achieve-panel"><h3>Achievements</h3><div id="ach-list"></div></div>
 <div id="achieve-banner"></div>
+<div id="zoom-vignette"></div><div id="zoom-hud"></div>
 <div id="quest-log"><h3>Quest Log</h3><div id="quest-list"></div></div>
 
 <script type="importmap">
@@ -1957,8 +1960,9 @@ document.addEventListener('pointerlockchange', () => {
 
 document.addEventListener('mousemove', (e) => {
   if (!isLocked || gamePaused) return;
-  yaw -= e.movementX * MOUSE_SENSITIVITY;
-  pitch -= e.movementY * MOUSE_SENSITIVITY;
+  const sens = MOUSE_SENSITIVITY * (zoomLevel > 0 ? 0.5 : 1);
+  yaw -= e.movementX * sens;
+  pitch -= e.movementY * sens;
   pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, pitch));
 });
 
@@ -2002,9 +2006,10 @@ document.addEventListener('keydown', (e) => {
   if (e.code === 'KeyE' && nearestNPC && !dialogOpen) openNPCDialog(nearestNPC);
   if (e.code === 'KeyF') tryFish();
   if (e.code === 'KeyN') toggleSnow();
+  if (e.code === 'KeyZ' && !zHeld) { zHeld=true; zoomLevel=3; targetFOV=ZOOM_FOVS[3]; }
   if (e.code === 'Space' && onGround) { velocityY = 8; onGround = false; }
 });
-document.addEventListener('keyup', (e) => { keys[e.code] = false; });
+document.addEventListener('keyup', (e) => { keys[e.code] = false; if (e.code==='KeyZ') { zHeld=false; zoomLevel=0; targetFOV=70; } });
 
 // Initialize VR (async check, button setup)
 initVR();
@@ -2232,6 +2237,17 @@ function updateSnow(dt) {
   }
 }
 
+// ── Binocular Zoom ──────────────────────────────────────────────
+const ZOOM_FOVS = [70, 35, 17.5, 8.75], ZOOM_LABELS = ['1x','2x','4x','8x'];
+let zoomLevel = 0, targetFOV = 70, zHeld = false, vrZoom = false;
+const zoomVig = document.getElementById('zoom-vignette'), zoomHud = document.getElementById('zoom-hud');
+document.addEventListener('wheel', (e) => {
+  if (!isLocked || gamePaused || inVR) return;
+  if (e.deltaY < 0) zoomLevel = Math.min(zoomLevel + 1, 3);
+  else zoomLevel = Math.max(zoomLevel - 1, 0);
+  targetFOV = ZOOM_FOVS[zoomLevel];
+}, { passive: true });
+
 // ── Animation loop ─────────────────────────────────────────────────
 const clock = new THREE.Clock();
 let prevTerrainY = getTerrainHeight(0, 0);
@@ -2297,7 +2313,15 @@ function animate() {
           const btns = source.gamepad.buttons;
           if (btns[4] && btns[4].pressed && nearestNPC && !dialogOpen) openNPCDialog(nearestNPC);
           if (btns[5] && btns[5].pressed && onGround) { velocityY = 8; onGround = false; }
-          // Y button (index 5 on left) or B button (index 5 on right) toggles VR settings
+          // Right thumbstick click (btn 3) toggles VR zoom
+          if (btns[3] && btns[3].pressed && vrTurnCooldown <= 0) {
+            vrZoom = !vrZoom; cameraRig.scale.setScalar(vrZoom ? 0.25 : 1); vrTurnCooldown = 0.5;
+            const { ctx: lx, canvas: lc, tex } = vrSettingsGroup.userData;
+            lx.clearRect(0,0,lc.width,lc.height); lx.fillStyle='#fff'; lx.font='bold 28px sans-serif'; lx.textAlign='center';
+            lx.fillText(vrZoom?'4x ZOOM':'Zoom Off',lc.width/2,lc.height/2+10); tex.needsUpdate=true;
+            vrSettingsGroup.visible=true; vrSettingsGroup.position.set(0,1.4,-0.8);
+            setTimeout(()=>{if(!vrZoom)vrSettingsGroup.visible=false;},3000);
+          }
         }
         if (source.handedness === 'left' && source.gamepad && source.gamepad.buttons[5]) {
           if (source.gamepad.buttons[5].pressed && vrTurnCooldown <= 0) {
@@ -2350,6 +2374,13 @@ function animate() {
 
     euler.set(pitch, yaw, 0);
     camera.quaternion.setFromEuler(euler);
+    // Zoom FOV lerp
+    camera.fov += (targetFOV - camera.fov) * 0.15;
+    camera.updateProjectionMatrix();
+    const zoomed = zoomLevel > 0;
+    zoomVig.style.display = zoomed ? 'block' : 'none';
+    zoomHud.style.display = zoomed ? 'block' : 'none';
+    if (zoomed) zoomHud.textContent = ZOOM_LABELS[zoomLevel];
 
     hudPos.textContent = `${camera.position.x.toFixed(0)}, ${camera.position.z.toFixed(0)}`;
     hudDir.textContent = getCardinal(yaw);
