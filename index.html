@@ -121,6 +121,15 @@
   }
   #stamina-fill { height: 100%; width: 100%; border-radius: 3px; transition: width 0.1s, background 0.3s; }
 
+  #rain-overlay {
+    position: fixed; inset: 0; z-index: 40; pointer-events: none;
+    background: rgba(20,30,60,0.08); opacity: 0; transition: opacity 1s;
+  }
+  #lightning-flash {
+    position: fixed; inset: 0; z-index: 45; pointer-events: none;
+    background: #fff; opacity: 0; transition: opacity 0.1s;
+  }
+
   #interact-hint {
     position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
     z-index: 50; color: rgba(255,255,255,0.8); font-size: 13px;
@@ -153,7 +162,8 @@
   <span class="label">DIR</span> <span id="hud-dir">N</span><br>
   <span class="label">ALT</span> <span id="hud-alt">0</span>m<br>
   <span class="label">TIME</span> <span id="hud-time">06:00</span><br>
-  <span class="label">GEMS</span> <span id="hud-gems">0 / 15</span>
+  <span class="label">GEMS</span> <span id="hud-gems">0 / 15</span><br>
+  <span class="label">SKY</span> <span id="hud-weather">☀️ Clear</span>
   <div id="stamina-bar"><div id="stamina-fill" style="background:#4CAF50"></div></div>
 </div>
 
@@ -164,6 +174,8 @@
     <button id="dialog-close">Close</button>
   </div>
 </div>
+<div id="rain-overlay"></div>
+<div id="lightning-flash"></div>
 <div id="save-toast">Game saved</div>
 <div id="settings-panel"><button id="reset-save-btn">Reset Save</button></div>
 <canvas id="minimap" width="150" height="150"></canvas>
@@ -297,6 +309,7 @@ function getVRThumbstickAxes(handedness) {
 
 // ── Stamina ─────────────────────────────────────────────────────────
 let stamina = 100, sprintLocked = false;
+let velocityY = 0, onGround = true;
 const staminaFill = document.getElementById('stamina-fill');
 function getVRGripPressed() {
   const session = renderer.xr.getSession();
@@ -416,6 +429,63 @@ function updateFireflies(dt, elapsed) {
     f.mesh.position.y = ty + 1 + Math.sin(elapsed * 2 + f.phase) * 2;
     f.mat.opacity = nightFade * (0.5 + Math.sin(elapsed * 3 + f.phase) * 0.4);
     if (Math.random() < dt * 0.3) f.dir.set(Math.random()-0.5, 0, Math.random()-0.5).normalize();
+  }
+}
+
+// ── Weather System ──────────────────────────────────────────────────
+let weather = 'clear', weatherTimer = 60 + Math.random() * 60;
+const rainOverlay = document.getElementById('rain-overlay');
+const lightningFlash = document.getElementById('lightning-flash');
+const hudWeather = document.getElementById('hud-weather');
+const baseFogDensity = 0.0018;
+
+// Rain particles
+const RAIN_COUNT = 500;
+const rainGeo = new THREE.BufferGeometry();
+const rainPositions = new Float32Array(RAIN_COUNT * 6); // 2 verts per line
+rainGeo.setAttribute('position', new THREE.BufferAttribute(rainPositions, 3));
+const rainMat = new THREE.LineBasicMaterial({ color: 0x8abbde, transparent: true, opacity: 0.4 });
+const rainLines = new THREE.LineSegments(rainGeo, rainMat);
+rainLines.visible = false;
+scene.add(rainLines);
+
+function triggerLightning() {
+  lightningFlash.style.transition = 'opacity 0.05s';
+  lightningFlash.style.opacity = '0.7';
+  setTimeout(() => { lightningFlash.style.transition = 'opacity 0.3s'; lightningFlash.style.opacity = '0'; }, 100);
+  setTimeout(() => {
+    lightningFlash.style.transition = 'opacity 0.05s'; lightningFlash.style.opacity = '0.5';
+    setTimeout(() => { lightningFlash.style.transition = 'opacity 0.4s'; lightningFlash.style.opacity = '0'; }, 80);
+  }, 2000);
+}
+
+function updateWeather(dt) {
+  weatherTimer -= dt;
+  if (weatherTimer <= 0) {
+    weather = weather === 'clear' ? 'rain' : 'clear';
+    weatherTimer = 60 + Math.random() * 60;
+    rainLines.visible = weather === 'rain';
+    rainOverlay.style.opacity = weather === 'rain' ? '1' : '0';
+    hudWeather.textContent = weather === 'rain' ? '🌧️ Rain' : '☀️ Clear';
+    if (weather === 'rain') triggerLightning();
+  }
+  scene.fog.density = weather === 'rain' ? baseFogDensity * 2.5 : baseFogDensity;
+  if (weather === 'rain') {
+    const pp = inVR ? cameraRig.position : camera.position;
+    const arr = rainGeo.attributes.position.array;
+    for (let i = 0; i < RAIN_COUNT; i++) {
+      let idx = i * 6;
+      let y = arr[idx + 1];
+      if (y === 0 || y < getTerrainHeight(arr[idx], arr[idx + 2]) - 2) {
+        const rx = pp.x + (Math.random() - 0.5) * 80, rz = pp.z + (Math.random() - 0.5) * 80;
+        arr[idx] = rx; arr[idx+1] = pp.y + 20 + Math.random() * 30; arr[idx+2] = rz;
+        arr[idx+3] = rx; arr[idx+4] = arr[idx+1] - 1.5; arr[idx+5] = rz;
+      } else {
+        const fall = 35 * dt;
+        arr[idx+1] -= fall; arr[idx+4] -= fall;
+      }
+    }
+    rainGeo.attributes.position.needsUpdate = true;
   }
 }
 
@@ -771,6 +841,62 @@ function placeFlowers() {
 
 placeFlowers();
 
+// ── Campfires ───────────────────────────────────────────────────────
+const campfires = [];
+const campfirePositions = [[20, 0, 30], [-40, 0, 10], [10, 0, -50]];
+const logMat = new THREE.MeshStandardMaterial({ color: 0x3B2010, roughness: 0.95 });
+const logGeo = new THREE.BoxGeometry(0.3, 1.2, 0.3);
+const particleGeo = new THREE.PlaneGeometry(0.3, 0.3);
+
+for (const [cx, , cz] of campfirePositions) {
+  const cy = getTerrainHeight(cx, cz);
+  const group = new THREE.Group();
+  group.position.set(cx, cy, cz);
+  // Logs in ring
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2;
+    const log = new THREE.Mesh(logGeo, logMat);
+    log.position.set(Math.cos(a) * 0.6, 0.15, Math.sin(a) * 0.6);
+    log.rotation.set(0.3, a, Math.PI / 2);
+    group.add(log);
+  }
+  // Point light
+  const light = new THREE.PointLight(0xff6600, 2, 15);
+  light.position.set(0, 1.5, 0);
+  group.add(light);
+  // Fire particles
+  const particles = [];
+  for (let i = 0; i < 20; i++) {
+    const pMat = new THREE.MeshBasicMaterial({
+      color: Math.random() > 0.5 ? 0xff8800 : 0xffcc00,
+      transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false
+    });
+    const p = new THREE.Mesh(particleGeo, pMat);
+    p.position.set((Math.random()-0.5)*0.6, Math.random()*2, (Math.random()-0.5)*0.6);
+    p.userData.vy = 1 + Math.random() * 2;
+    p.userData.phase = Math.random() * Math.PI * 2;
+    group.add(p);
+    particles.push(p);
+  }
+  scene.add(group);
+  campfires.push({ group, light, particles });
+}
+
+function updateCampfires(dt, elapsed) {
+  for (const cf of campfires) {
+    cf.light.intensity = 1.5 + Math.random();
+    for (const p of cf.particles) {
+      p.position.y += p.userData.vy * dt;
+      p.material.opacity = Math.max(0, 0.8 - p.position.y * 0.3);
+      p.rotation.z = Math.sin(elapsed * 3 + p.userData.phase) * 0.3;
+      if (p.position.y > 3) {
+        p.position.set((Math.random()-0.5)*0.6, 0, (Math.random()-0.5)*0.6);
+        p.material.opacity = 0.8;
+      }
+    }
+  }
+}
+
 // ── Collectible Gems ────────────────────────────────────────────────
 const GEM_COUNT = 15, GEM_COLLECT_DIST = 2;
 const gemColors = [0xff3333, 0x3399ff, 0x33cc66, 0xffcc00, 0xaa44ff];
@@ -984,6 +1110,7 @@ document.addEventListener('mousemove', (e) => {
 document.addEventListener('keydown', (e) => {
   keys[e.code] = true;
   if (e.code === 'KeyE' && nearestNPC && !dialogOpen) openNPCDialog(nearestNPC);
+  if (e.code === 'Space' && onGround) { velocityY = 8; onGround = false; }
 });
 document.addEventListener('keyup', (e) => { keys[e.code] = false; });
 
@@ -1037,9 +1164,11 @@ function animate() {
     cameraRig.position.x = THREE.MathUtils.clamp(cameraRig.position.x, -halfVR, halfVR);
     cameraRig.position.z = THREE.MathUtils.clamp(cameraRig.position.z, -halfVR, halfVR);
 
-    // Ground following for VR rig
+    // Gravity for VR rig
     const vrTerrainY = getTerrainHeight(cameraRig.position.x, cameraRig.position.z);
-    cameraRig.position.y = THREE.MathUtils.lerp(cameraRig.position.y, vrTerrainY, 1 - Math.pow(0.001, dt));
+    velocityY = Math.max(velocityY - 20 * dt, -30);
+    cameraRig.position.y += velocityY * dt;
+    if (cameraRig.position.y <= vrTerrainY) { cameraRig.position.y = vrTerrainY; velocityY = 0; onGround = true; }
 
     // VR A-button (button 4) on right controller to interact with NPC
     const session = renderer.xr.getSession();
@@ -1047,6 +1176,7 @@ function animate() {
       for (const source of session.inputSources) {
         if (source.handedness === 'right' && source.gamepad && source.gamepad.buttons[4]) {
           if (source.gamepad.buttons[4].pressed && nearestNPC && !dialogOpen) openNPCDialog(nearestNPC);
+          if (source.gamepad.buttons[5] && source.gamepad.buttons[5].pressed && onGround) { velocityY = 8; onGround = false; }
         }
       }
     }
@@ -1083,9 +1213,11 @@ function animate() {
     camera.position.z = THREE.MathUtils.clamp(camera.position.z, -halfSize, halfSize);
 
     const terrainY = getTerrainHeight(camera.position.x, camera.position.z);
-    const targetY = terrainY + PLAYER_HEIGHT;
-    prevTerrainY = THREE.MathUtils.lerp(prevTerrainY, targetY, 1 - Math.pow(0.001, dt));
-    camera.position.y = prevTerrainY;
+    const groundY = terrainY + PLAYER_HEIGHT;
+    velocityY = Math.max(velocityY - 20 * dt, -30);
+    camera.position.y += velocityY * dt;
+    if (camera.position.y <= groundY) { camera.position.y = groundY; velocityY = 0; onGround = true; }
+    prevTerrainY = camera.position.y;
 
     euler.set(pitch, yaw, 0);
     camera.quaternion.setFromEuler(euler);
@@ -1118,7 +1250,11 @@ function animate() {
     hudTime.textContent = `${String(Math.floor(totalMin/60)).padStart(2,'0')}:${String(totalMin%60).padStart(2,'0')}`;
   }
 
-  // Fireflies
+  // Weather
+  updateWeather(dt);
+
+  // Campfires & Fireflies
+  updateCampfires(dt, clock.elapsedTime);
   updateFireflies(dt, clock.elapsedTime);
 
   // Minimap (desktop only)
