@@ -96,6 +96,12 @@
     pointer-events: none; overflow: hidden;
   }
 
+  #stamina-bar {
+    width: 100%; height: 6px; background: rgba(0,0,0,0.3);
+    border-radius: 3px; margin-top: 6px; overflow: hidden;
+  }
+  #stamina-fill { height: 100%; width: 100%; border-radius: 3px; transition: width 0.1s, background 0.3s; }
+
   #interact-hint {
     position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
     z-index: 50; color: rgba(255,255,255,0.8); font-size: 13px;
@@ -129,6 +135,7 @@
   <span class="label">ALT</span> <span id="hud-alt">0</span>m<br>
   <span class="label">TIME</span> <span id="hud-time">06:00</span><br>
   <span class="label">GEMS</span> <span id="hud-gems">0 / 15</span>
+  <div id="stamina-bar"><div id="stamina-fill" style="background:#4CAF50"></div></div>
 </div>
 
 <div id="npc-dialog">
@@ -265,6 +272,19 @@ function getVRThumbstickAxes(handedness) {
     }
   }
   return [0, 0];
+}
+
+// ── Stamina ─────────────────────────────────────────────────────────
+let stamina = 100, sprintLocked = false;
+const staminaFill = document.getElementById('stamina-fill');
+function getVRGripPressed() {
+  const session = renderer.xr.getSession();
+  if (!session) return false;
+  for (const src of session.inputSources) {
+    if (src.handedness === 'left' && src.gamepad && src.gamepad.buttons[1])
+      return src.gamepad.buttons[1].pressed;
+  }
+  return false;
 }
 
 // ── Scene ──────────────────────────────────────────────────────────
@@ -945,9 +965,11 @@ function animate() {
       forward.y = 0; forward.normalize();
       const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0,1,0)).normalize();
 
+      const vrSprint = getVRGripPressed() && !sprintLocked && stamina > 0;
+      const vrSpeed = vrSprint ? RUN_SPEED : WALK_SPEED;
       const moveVec = new THREE.Vector3();
-      moveVec.addScaledVector(right, lx * WALK_SPEED * dt);
-      moveVec.addScaledVector(forward, -lz * WALK_SPEED * dt);
+      moveVec.addScaledVector(right, lx * vrSpeed * dt);
+      moveVec.addScaledVector(forward, -lz * vrSpeed * dt);
       cameraRig.position.add(moveVec);
     }
 
@@ -979,7 +1001,9 @@ function animate() {
     }
   } else if (isLocked) {
     // ── Desktop locomotion ──
-    const speed = keys['ShiftLeft'] || keys['ShiftRight'] ? RUN_SPEED : WALK_SPEED;
+    const wantSprint = keys['ShiftLeft'] || keys['ShiftRight'];
+    const canSprint = wantSprint && !sprintLocked && stamina > 0;
+    const speed = canSprint ? RUN_SPEED : WALK_SPEED;
 
     direction.set(0, 0, 0);
     if (keys['KeyW'] || keys['ArrowUp'])    direction.z -= 1;
@@ -1018,6 +1042,21 @@ function animate() {
     hudPos.textContent = `${camera.position.x.toFixed(0)}, ${camera.position.z.toFixed(0)}`;
     hudDir.textContent = getCardinal(yaw);
     hudAlt.textContent = (camera.position.y - PLAYER_HEIGHT).toFixed(1);
+  }
+
+  // Stamina update
+  {
+    const moving = inVR ? (Math.abs(getVRThumbstickAxes('left')[0])>0.1 || Math.abs(getVRThumbstickAxes('left')[1])>0.1) : direction.length() > 0;
+    const sprinting = inVR ? (getVRGripPressed() && moving) : ((keys['ShiftLeft']||keys['ShiftRight']) && moving);
+    if (sprinting && !sprintLocked && stamina > 0) {
+      stamina = Math.max(0, stamina - 20 * dt);
+      if (stamina <= 0) sprintLocked = true;
+    } else {
+      stamina = Math.min(100, stamina + 15 * dt);
+      if (sprintLocked && stamina >= 20) sprintLocked = false;
+    }
+    staminaFill.style.width = stamina + '%';
+    staminaFill.style.background = stamina > 50 ? '#4CAF50' : stamina > 25 ? '#FFC107' : '#F44336';
   }
 
   // Day/night cycle
