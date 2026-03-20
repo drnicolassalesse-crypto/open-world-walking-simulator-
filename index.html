@@ -89,6 +89,13 @@
   }
   #npc-dialog button:hover { background: rgba(255,255,255,0.25); }
 
+  #minimap {
+    position: fixed; bottom: 20px; right: 20px; z-index: 50;
+    width: 150px; height: 150px; border-radius: 50%;
+    border: 2px solid rgba(255,255,255,0.2);
+    pointer-events: none; overflow: hidden;
+  }
+
   #interact-hint {
     position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
     z-index: 50; color: rgba(255,255,255,0.8); font-size: 13px;
@@ -130,6 +137,7 @@
     <button id="dialog-close">Close</button>
   </div>
 </div>
+<canvas id="minimap" width="150" height="150"></canvas>
 <div id="interact-hint">Press <kbd style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);border-radius:3px;padding:1px 6px">E</kbd> to talk</div>
 
 <script type="importmap">
@@ -780,6 +788,32 @@ const hudPos = document.getElementById('hud-pos');
 const hudDir = document.getElementById('hud-dir');
 const hudAlt = document.getElementById('hud-alt');
 const hudTime = document.getElementById('hud-time');
+const minimapCanvas = document.getElementById('minimap');
+const mmCtx = minimapCanvas.getContext('2d');
+const MINIMAP_RANGE = 200; // world units shown on minimap
+
+function drawMinimap() {
+  const px = inVR ? cameraRig.position.x : camera.position.x;
+  const pz = inVR ? cameraRig.position.z : camera.position.z;
+  mmCtx.clearRect(0, 0, 150, 150);
+  mmCtx.fillStyle = 'rgba(10,15,25,0.7)';
+  mmCtx.beginPath(); mmCtx.arc(75, 75, 75, 0, Math.PI * 2); mmCtx.fill();
+  // NPC dots
+  for (const n of npcs) {
+    const dx = (n.group.position.x - px) / MINIMAP_RANGE * 75;
+    const dz = (n.group.position.z - pz) / MINIMAP_RANGE * 75;
+    if (Math.abs(dx) < 72 && Math.abs(dz) < 72) {
+      mmCtx.fillStyle = '#' + n.def.color.toString(16).padStart(6, '0');
+      mmCtx.beginPath(); mmCtx.arc(75 + dx, 75 + dz, 3, 0, Math.PI * 2); mmCtx.fill();
+    }
+  }
+  // Player dot (center)
+  mmCtx.fillStyle = '#fff';
+  mmCtx.beginPath(); mmCtx.arc(75, 75, 4, 0, Math.PI * 2); mmCtx.fill();
+  // North indicator
+  mmCtx.fillStyle = 'rgba(255,255,255,0.6)'; mmCtx.font = 'bold 11px sans-serif';
+  mmCtx.textAlign = 'center'; mmCtx.fillText('N', 75, 14);
+}
 
 let isLocked = false;
 let pitch = 0, yaw = 0;
@@ -923,6 +957,10 @@ function animate() {
     const totalMin = Math.floor(timeOfDay * 1440);
     hudTime.textContent = `${String(Math.floor(totalMin/60)).padStart(2,'0')}:${String(totalMin%60).padStart(2,'0')}`;
   }
+
+  // Minimap (desktop only)
+  minimapCanvas.style.display = inVR ? 'none' : 'block';
+  if (!inVR) drawMinimap();
 
   // Update NPCs
   updateNPCs(dt);
