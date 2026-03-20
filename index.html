@@ -1301,6 +1301,41 @@ function updateBirds(elapsed) {
   sign.position.set(2.5, by + 2.3, -50); sign.castShadow = true; scene.add(sign);
 }
 
+// ── Mirror Lake ─────────────────────────────────────────────────
+let mirrorLakeMsg = false;
+{
+  const ly = getTerrainHeight(20, -20);
+  const lake = new THREE.Mesh(new THREE.CylinderGeometry(8, 8, 0.05, 24),
+    new THREE.MeshStandardMaterial({ color: 0x88aacc, metalness: 0.9, roughness: 0.05 }));
+  lake.position.set(20, ly + 0.03, -20); lake.receiveShadow = true; scene.add(lake);
+  // Stones
+  const stoneGeo = new THREE.SphereGeometry(0.5, 6, 4);
+  const stoneMat = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.9, flatShading: true });
+  const stoneOffs = [[7,0],[5,5],[-3,7],[-7,1],[-5,-6],[2,-7]];
+  for (const [sx, sz] of stoneOffs) {
+    const s = new THREE.Mesh(stoneGeo, stoneMat);
+    s.position.set(20+sx, ly+0.15, -20+sz); s.scale.set(1, 0.4, 1); s.castShadow = true; scene.add(s);
+  }
+  // Lily pads
+  const lilyGeo = new THREE.CircleGeometry(0.6, 8);
+  const lilyMat = new THREE.MeshStandardMaterial({ color: 0x33aa44, side: THREE.DoubleSide });
+  for (const [lx, lz] of [[3,1],[-2,3],[1,-3]]) {
+    const lp = new THREE.Mesh(lilyGeo, lilyMat);
+    lp.rotation.x = -Math.PI/2; lp.position.set(20+lx, ly+0.06, -20+lz); scene.add(lp);
+  }
+}
+function updateMirrorLake() {
+  if (mirrorLakeMsg) return;
+  const pp = inVR ? cameraRig.position : camera.position;
+  const dx = pp.x - 20, dz = pp.z + 20;
+  if (Math.sqrt(dx*dx+dz*dz) < 12) {
+    mirrorLakeMsg = true;
+    const t = document.getElementById('save-toast');
+    t.textContent = 'Crystal waters reflect the sky above...';
+    t.style.opacity = '1'; setTimeout(() => { t.style.opacity = '0'; t.textContent = 'Game saved'; }, 3000);
+  }
+}
+
 // ── Waterfalls ──────────────────────────────────────────────────
 const waterfalls = [];
 let waterfallGain;
@@ -2219,6 +2254,7 @@ function animate() {
   updateWaterfalls(dt, clock.elapsedTime);
   updateMushrooms(dt);
   updateSigns();
+  updateMirrorLake();
 
   // Animate water UV
   waterGeo.attributes.uv.array[0] += dt * 0.02; waterGeo.attributes.uv.array[2] += dt * 0.02;
