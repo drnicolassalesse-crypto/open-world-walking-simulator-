@@ -528,9 +528,41 @@ const sunMesh = new THREE.Mesh(sunGeo, sunMat);
 sunMesh.position.copy(sunLight.position).normalize().multiplyScalar(800);
 scene.add(sunMesh);
 
+// ── Sky Dome ────────────────────────────────────────────────────
+const skyDomeGeo = new THREE.SphereGeometry(900, 24, 16);
+const skyDomeMat = new THREE.ShaderMaterial({
+  side: THREE.BackSide, depthWrite: false,
+  uniforms: { topColor: {value: new THREE.Color(0x87CEEB)}, bottomColor: {value: new THREE.Color(0xffffff)}, offset: {value: 10}, exponent: {value: 0.6} },
+  vertexShader: 'varying vec3 vWorldPos; void main(){vWorldPos=(modelMatrix*vec4(position,1.0)).xyz; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}',
+  fragmentShader: 'uniform vec3 topColor;uniform vec3 bottomColor;uniform float offset;uniform float exponent;varying vec3 vWorldPos;void main(){float h=normalize(vWorldPos+offset).y;gl_FragColor=vec4(mix(bottomColor,topColor,max(pow(max(h,0.0),exponent),0.0)),1.0);}'
+});
+const skyDome = new THREE.Mesh(skyDomeGeo, skyDomeMat);
+scene.add(skyDome);
+
+// Stars
+const starCount = 300;
+const starGeo = new THREE.BufferGeometry();
+const starPos = new Float32Array(starCount * 3);
+for (let i = 0; i < starCount; i++) {
+  const theta = Math.random()*Math.PI*2, phi = Math.acos(Math.random()*0.8+0.2);
+  starPos[i*3] = Math.sin(phi)*Math.cos(theta)*800;
+  starPos[i*3+1] = Math.cos(phi)*800;
+  starPos[i*3+2] = Math.sin(phi)*Math.sin(theta)*800;
+}
+starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 1.5, transparent: true, opacity: 0, depthWrite: false });
+const stars = new THREE.Points(starGeo, starMat);
+scene.add(stars);
+
+// Moon sphere
+const moonGeo = new THREE.SphereGeometry(6, 12, 8);
+const moonMat = new THREE.MeshBasicMaterial({ color: 0xeeeeff });
+const moonMesh = new THREE.Mesh(moonGeo, moonMat);
+moonMesh.visible = false; scene.add(moonMesh);
+
 // ── Day/Night Cycle ─────────────────────────────────────────────────
-let timeOfDay = 0.3; // 0-1, 0.3=morning, 0.5=noon, 0=midnight
-const DAY_DURATION = 7200; // 2 hours real time = 1 full day
+let timeOfDay = 0.3;
+const DAY_DURATION = 7200;
 const moonLight = new THREE.PointLight(0x8888ff, 0, 500);
 moonLight.position.set(0, 300, 0);
 scene.add(moonLight);
@@ -577,9 +609,23 @@ function updateDayNight(dt, playerX, playerZ) {
   ambColor.lerp(seasonAmbientTint[currentSeason], 0.2);
   ambientLight.color.copy(ambColor);
   ambientLight.intensity = 0.15 + dayFactor * 0.55;
-  // Moon
+  // Moon light + mesh
   moonLight.intensity = (1 - dayFactor) * 0.4;
   moonLight.position.set(playerX - sunAcross * 400, Math.max(-sunUp * 300, 50), playerZ - 200);
+  moonMesh.position.set(playerX - sunAcross * 500, Math.max(-sunUp * 400, 80), playerZ - 200);
+  moonMesh.visible = dayFactor < 0.4;
+  // Sky dome colors
+  const dawnColor = new THREE.Color(0xE88060), duskColor = new THREE.Color(0x9060B0);
+  const midnightTop = new THREE.Color(0x050520), noonTop = new THREE.Color(0x4488CC);
+  let topC;
+  if (dayFactor > 0.3) topC = noonTop.clone().lerp(sunsetFactor > 0 ? (t < 0.5 ? dawnColor : duskColor) : noonTop, sunsetFactor);
+  else topC = midnightTop.clone().lerp(noonTop, dayFactor * 3);
+  skyDomeMat.uniforms.topColor.value.copy(topC);
+  skyDomeMat.uniforms.bottomColor.value.copy(skyColor);
+  skyDome.position.set(playerX, 0, playerZ);
+  stars.position.set(playerX, 0, playerZ);
+  // Stars fade
+  starMat.opacity = Math.max(0, 1 - dayFactor * 3);
 }
 
 // ── Fireflies ───────────────────────────────────────────────────────
