@@ -195,6 +195,21 @@
     border: 1px solid rgba(255,255,255,0.12); border-radius: 10px;
     padding: 12px 24px; display: none;
   }
+  #quest-log {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    z-index: 350; display: none; background: rgba(0,0,0,0.75); backdrop-filter: blur(10px);
+    border: 1px solid rgba(255,255,255,0.15); border-radius: 14px;
+    padding: 24px 28px; color: #fff; min-width: 320px;
+  }
+  #quest-log h3 { font-size: 16px; font-weight: 300; letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 14px; text-align: center; }
+  .quest-item { margin-bottom: 10px; }
+  .quest-name { font-size: 13px; font-weight: bold; }
+  .quest-desc { font-size: 11px; color: rgba(255,255,255,0.5); }
+  .quest-bar { height: 5px; background: rgba(255,255,255,0.1); border-radius: 3px; margin-top: 3px; overflow: hidden; }
+  .quest-bar-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
+  .quest-status { font-size: 10px; float: right; }
+  .quest-status.active { color: #4CAF50; }
+  .quest-status.complete { color: #FFD700; }
 </style>
 </head>
 <body>
@@ -253,6 +268,7 @@
 <div id="interact-hint">Press <kbd style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);border-radius:3px;padding:1px 6px">E</kbd> to talk</div>
 <div id="inventory-panel"><h3>Inventory</h3><div id="inv-grid"></div></div>
 <div id="fish-status"></div>
+<div id="quest-log"><h3>Quest Log</h3><div id="quest-list"></div></div>
 
 <script type="importmap">
 {
@@ -1492,6 +1508,37 @@ function toggleInventory() {
 }
 renderInventory();
 
+// ── Quest Log ────────────────────────────────────────────────────
+let questLogOpen = false;
+const questLogPanel = document.getElementById('quest-log');
+const questList = document.getElementById('quest-list');
+
+function getQuests() {
+  const specialGemCollected = gems.length > 0 && gems[gems.length - 1].collected;
+  return [
+    { name: 'Gem Hunter', desc: 'Collect all 15 gems', cur: gemsCollected, max: 15, done: gemsCollected >= 15 },
+    { name: 'The Special One', desc: 'Find the floating island gem', cur: specialGemCollected ? 1 : 0, max: 1, done: specialGemCollected },
+    { name: 'Treasure Hunter', desc: 'Open the treasure chest', cur: chestOpened ? 1 : 0, max: 1, done: chestOpened },
+    { name: 'Master Angler', desc: 'Catch 3 fish', cur: Math.min(fishCaught, 3), max: 3, done: fishCaught >= 3 },
+  ];
+}
+
+function renderQuestLog() {
+  questList.innerHTML = '';
+  for (const q of getQuests()) {
+    const pct = Math.min(100, (q.cur / q.max) * 100);
+    const status = q.done ? 'complete' : 'active';
+    questList.innerHTML += `<div class="quest-item"><span class="quest-name">${q.name}</span><span class="quest-status ${status}">${q.done ? 'Complete' : 'Active'}</span><div class="quest-desc">${q.desc} (${q.cur}/${q.max})</div><div class="quest-bar"><div class="quest-bar-fill" style="width:${pct}%;background:${q.done ? '#FFD700' : '#4CAF50'}"></div></div></div>`;
+  }
+}
+
+function toggleQuestLog() {
+  questLogOpen = !questLogOpen;
+  questLogPanel.style.display = questLogOpen ? 'block' : 'none';
+  if (questLogOpen) { renderQuestLog(); if (!inVR) document.exitPointerLock(); }
+  else if (!inVR) renderer.domElement.requestPointerLock();
+}
+
 // ── NPCs ──────────────────────────────────────────────────────────
 const NPC_DIST = 5, npcs = [], npcDefs = [
   { name:'Elara', color:0xE84393, msgs:['The sunset from the hilltop is breathtaking.','Have you seen the flowers by the valley?','I come here to think. It\'s peaceful.'], hint:'Gems glow brighter at dawn — check the eastern ridge.', lore:'This valley was once a lake, thousands of years ago.' },
@@ -1692,6 +1739,8 @@ document.getElementById('pause-reset').addEventListener('click', () => {
 
 document.addEventListener('keydown', (e) => {
   if (e.code === 'KeyI') { toggleInventory(); return; }
+  if (e.code === 'KeyQ') { toggleQuestLog(); return; }
+  if (e.code === 'Escape' && questLogOpen) { toggleQuestLog(); return; }
   if (e.code === 'Escape' && inventoryOpen) { toggleInventory(); return; }
   if (e.code === 'Escape' && dialogOpen) { closeDialog(); return; }
   if (e.code === 'Escape' && !dialogOpen) { e.preventDefault(); togglePause(); return; }
