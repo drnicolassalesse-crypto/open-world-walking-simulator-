@@ -89,6 +89,13 @@
   }
   #npc-dialog button:hover { background: rgba(255,255,255,0.25); }
 
+  #minimap {
+    position: fixed; bottom: 20px; right: 20px; z-index: 50;
+    width: 150px; height: 150px; border-radius: 50%;
+    border: 2px solid rgba(255,255,255,0.2);
+    pointer-events: none; overflow: hidden;
+  }
+
   #interact-hint {
     position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
     z-index: 50; color: rgba(255,255,255,0.8); font-size: 13px;
@@ -119,7 +126,9 @@
 <div id="hud">
   <span class="label">POS</span> <span id="hud-pos">0, 0, 0</span><br>
   <span class="label">DIR</span> <span id="hud-dir">N</span><br>
-  <span class="label">ALT</span> <span id="hud-alt">0</span>m
+  <span class="label">ALT</span> <span id="hud-alt">0</span>m<br>
+  <span class="label">TIME</span> <span id="hud-time">06:00</span><br>
+  <span class="label">GEMS</span> <span id="hud-gems">0 / 15</span>
 </div>
 
 <div id="npc-dialog">
@@ -129,6 +138,7 @@
     <button id="dialog-close">Close</button>
   </div>
 </div>
+<canvas id="minimap" width="150" height="150"></canvas>
 <div id="interact-hint">Press <kbd style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);border-radius:3px;padding:1px 6px">E</kbd> to talk</div>
 
 <script type="importmap">
@@ -296,6 +306,48 @@ const sunMesh = new THREE.Mesh(sunGeo, sunMat);
 sunMesh.position.copy(sunLight.position).normalize().multiplyScalar(800);
 scene.add(sunMesh);
 
+// ── Day/Night Cycle ─────────────────────────────────────────────────
+let timeOfDay = 0.3; // 0-1, 0.3=morning, 0.5=noon, 0=midnight
+const DAY_DURATION = 300; // 5 minutes real time = 1 full day
+const moonLight = new THREE.PointLight(0x8888ff, 0, 500);
+moonLight.position.set(0, 300, 0);
+scene.add(moonLight);
+
+function updateDayNight(dt, playerX, playerZ) {
+  timeOfDay = (timeOfDay + dt / DAY_DURATION) % 1;
+  const t = timeOfDay;
+  // Sun angle: rises at t=0.25, sets at t=0.75
+  const sunAngle = (t - 0.25) * Math.PI * 2;
+  const sunUp = Math.sin(sunAngle);
+  const sunAcross = Math.cos(sunAngle);
+  // Sun position arc relative to player
+  sunLight.position.set(playerX + sunAcross * 300, Math.max(sunUp * 400, -100), playerZ + 200);
+  sunLight.target.position.set(playerX, 0, playerZ);
+  sunMesh.position.set(playerX + sunAcross * 800, Math.max(sunUp * 600, -200), playerZ + 200);
+  sunMesh.visible = sunUp > -0.05;
+  // Sun intensity & color
+  const dayFactor = THREE.MathUtils.clamp(sunUp * 3, 0, 1);
+  sunLight.intensity = dayFactor * 2.2;
+  const horizonFactor = 1 - Math.abs(sunUp);
+  const sunColor = new THREE.Color().setHSL(0.1 - horizonFactor * 0.07, 0.6 + horizonFactor * 0.3, 0.5 + dayFactor * 0.4);
+  sunLight.color.copy(sunColor);
+  // Sky color
+  const nightSky = new THREE.Color(0x0a0a2a);
+  const daySky = new THREE.Color(0x87CEEB);
+  const dawnSky = new THREE.Color(0xe8836b);
+  let skyColor;
+  if (dayFactor > 0.5) skyColor = daySky.clone();
+  else if (dayFactor > 0.05) skyColor = nightSky.clone().lerp(dawnSky, dayFactor * 2).lerp(daySky, Math.max(0, (dayFactor - 0.25) * 4));
+  else skyColor = nightSky.clone();
+  scene.background.copy(skyColor);
+  scene.fog.color.copy(skyColor);
+  // Ambient
+  ambientLight.intensity = 0.15 + dayFactor * 0.55;
+  // Moon
+  moonLight.intensity = (1 - dayFactor) * 0.4;
+  moonLight.position.set(playerX - sunAcross * 400, Math.max(-sunUp * 300, 50), playerZ - 200);
+}
+
 // ── Noise helper ───────────────────────────────────────────────────
 const perlin = new ImprovedNoise();
 
@@ -390,6 +442,18 @@ function generateTerrain() {
 const terrain = generateTerrain();
 scene.add(terrain);
 scene.add(cameraRig);
+
+// ── Water Plane ─────────────────────────────────────────────────────
+const waterGeo = new THREE.PlaneGeometry(TERRAIN_SIZE, TERRAIN_SIZE, 1, 1);
+waterGeo.rotateX(-Math.PI / 2);
+const waterMat = new THREE.MeshStandardMaterial({
+  color: 0x1a6fa8, transparent: true, opacity: 0.75,
+  metalness: 0.1, roughness: 0.1, side: THREE.DoubleSide,
+});
+const waterPlane = new THREE.Mesh(waterGeo, waterMat);
+waterPlane.position.y = -2;
+waterPlane.receiveShadow = true;
+scene.add(waterPlane);
 
 // Height sampling via raycaster
 const terrainRaycaster = new THREE.Raycaster();
@@ -636,6 +700,49 @@ function placeFlowers() {
 
 placeFlowers();
 
+// ── Collectible Gems ────────────────────────────────────────────────
+const GEM_COUNT = 15, GEM_COLLECT_DIST = 2;
+const gemColors = [0xff3333, 0x3399ff, 0x33cc66, 0xffcc00, 0xaa44ff];
+const gems = [];
+let gemsCollected = 0;
+
+for (let i = 0; i < GEM_COUNT; i++) {
+  const color = gemColors[i % gemColors.length];
+  const mat = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.6, roughness: 0.2, metalness: 0.5 });
+  const mesh = new THREE.Mesh(new THREE.OctahedronGeometry(0.5, 0), mat);
+  const ang = Math.random() * Math.PI * 2, rad = 20 + Math.random() * 280;
+  const gx = Math.cos(ang) * rad, gz = Math.sin(ang) * rad;
+  mesh.position.set(gx, getTerrainHeight(gx, gz) + 1.5, gz);
+  mesh.castShadow = true;
+  scene.add(mesh);
+  gems.push({ mesh, baseY: mesh.position.y, collected: false });
+}
+
+function updateGems(dt, elapsed) {
+  const pp = inVR ? cameraRig.position : camera.position;
+  for (const g of gems) {
+    if (g.collected) continue;
+    g.mesh.rotation.y += dt * 1.5;
+    g.mesh.position.y = g.baseY + Math.sin(elapsed * 2 + g.baseY) * 0.3;
+    const dx = pp.x - g.mesh.position.x, dz = pp.z - g.mesh.position.z;
+    if (Math.sqrt(dx*dx + dz*dz) < GEM_COLLECT_DIST) {
+      g.collected = true; scene.remove(g.mesh); gemsCollected++;
+      document.getElementById('hud-gems').textContent = `${gemsCollected} / ${GEM_COUNT}`;
+    }
+  }
+  // VR: check right controller world position against gems
+  if (inVR && controller1) {
+    const cPos = new THREE.Vector3(); controller1.getWorldPosition(cPos);
+    for (const g of gems) {
+      if (g.collected) continue;
+      if (cPos.distanceTo(g.mesh.position) < GEM_COLLECT_DIST) {
+        g.collected = true; scene.remove(g.mesh); gemsCollected++;
+        document.getElementById('hud-gems').textContent = `${gemsCollected} / ${GEM_COUNT}`;
+      }
+    }
+  }
+}
+
 // ── NPCs ──────────────────────────────────────────────────────────
 const NPC_DIST = 5, npcs = [], npcDefs = [
   { name:'Elara', color:0xE84393, msgs:['The sunset from the hilltop is breathtaking.','Have you seen the flowers by the valley?','I come here to think. It\'s peaceful.'] },
@@ -683,13 +790,28 @@ for (let i = 0; i < npcDefs.length; i++) {
   scene.add(g);
   npcs.push({ group: g, bodyMat: bMat, def: d, msgIdx: 0,
     walkDir: new THREE.Vector3(Math.random()-0.5, 0, Math.random()-0.5).normalize(),
-    walkTimer: 3 + Math.random() * 2, pauseTimer: 0, isWalking: true, highlighted: false });
+    walkTimer: 3 + Math.random() * 2, pauseTimer: 0, isWalking: true, highlighted: false,
+    questState: 'idle', questGemsNeeded: 3 });
 }
 
 function openNPCDialog(npc) {
   dialogOpen = true;
   dialogName.textContent = npc.def.name;
-  dialogMsg.textContent = npc.def.msgs[npc.msgIdx++ % npc.def.msgs.length];
+  if (npc.questState === 'idle') {
+    // First interaction: give quest
+    dialogMsg.textContent = `Can you collect ${npc.questGemsNeeded} gems for me?`;
+    npc.questState = 'quest_given';
+  } else if (npc.questState === 'quest_given' && gemsCollected >= npc.questGemsNeeded) {
+    // Player has enough gems: reward
+    gemsCollected += 5;
+    document.getElementById('hud-gems').textContent = `${gemsCollected} / ${GEM_COUNT}`;
+    dialogMsg.textContent = 'Thank you! Here is your reward: +5 gems to your count!';
+    npc.questState = 'idle';
+  } else if (npc.questState === 'quest_given') {
+    dialogMsg.textContent = `I need ${npc.questGemsNeeded} gems. You only have ${gemsCollected} so far. Keep looking!`;
+  } else {
+    dialogMsg.textContent = npc.def.msgs[npc.msgIdx++ % npc.def.msgs.length];
+  }
   npcDialog.style.display = 'flex';
   if (!inVR) document.exitPointerLock();
 }
@@ -724,6 +846,44 @@ const blocker = document.getElementById('blocker');
 const hudPos = document.getElementById('hud-pos');
 const hudDir = document.getElementById('hud-dir');
 const hudAlt = document.getElementById('hud-alt');
+const hudTime = document.getElementById('hud-time');
+const minimapCanvas = document.getElementById('minimap');
+const mmCtx = minimapCanvas.getContext('2d');
+const MINIMAP_RANGE = 200; // world units shown on minimap
+
+function drawMinimap() {
+  const px = inVR ? cameraRig.position.x : camera.position.x;
+  const pz = inVR ? cameraRig.position.z : camera.position.z;
+  mmCtx.clearRect(0, 0, 150, 150);
+  mmCtx.fillStyle = 'rgba(10,15,25,0.7)';
+  mmCtx.beginPath(); mmCtx.arc(75, 75, 75, 0, Math.PI * 2); mmCtx.fill();
+  // NPC dots
+  for (const n of npcs) {
+    const dx = (n.group.position.x - px) / MINIMAP_RANGE * 75;
+    const dz = (n.group.position.z - pz) / MINIMAP_RANGE * 75;
+    if (Math.abs(dx) < 72 && Math.abs(dz) < 72) {
+      mmCtx.fillStyle = '#' + n.def.color.toString(16).padStart(6, '0');
+      mmCtx.beginPath(); mmCtx.arc(75 + dx, 75 + dz, 3, 0, Math.PI * 2); mmCtx.fill();
+    }
+  }
+  // Gem dots
+  for (const g of gems) {
+    if (g.collected) continue;
+    const gx = (g.mesh.position.x - px) / MINIMAP_RANGE * 75;
+    const gz = (g.mesh.position.z - pz) / MINIMAP_RANGE * 75;
+    if (Math.abs(gx) < 72 && Math.abs(gz) < 72) {
+      mmCtx.fillStyle = '#fff'; mmCtx.globalAlpha = 0.5;
+      mmCtx.beginPath(); mmCtx.arc(75 + gx, 75 + gz, 2, 0, Math.PI * 2); mmCtx.fill();
+      mmCtx.globalAlpha = 1;
+    }
+  }
+  // Player dot (center)
+  mmCtx.fillStyle = '#fff';
+  mmCtx.beginPath(); mmCtx.arc(75, 75, 4, 0, Math.PI * 2); mmCtx.fill();
+  // North indicator
+  mmCtx.fillStyle = 'rgba(255,255,255,0.6)'; mmCtx.font = 'bold 11px sans-serif';
+  mmCtx.textAlign = 'center'; mmCtx.fillText('N', 75, 14);
+}
 
 let isLocked = false;
 let pitch = 0, yaw = 0;
@@ -808,10 +968,6 @@ function animate() {
     const vrTerrainY = getTerrainHeight(cameraRig.position.x, cameraRig.position.z);
     cameraRig.position.y = THREE.MathUtils.lerp(cameraRig.position.y, vrTerrainY, 1 - Math.pow(0.001, dt));
 
-    // Move shadow camera with VR player
-    sunLight.position.set(cameraRig.position.x + 300, 400, cameraRig.position.z + 200);
-    sunLight.target.position.set(cameraRig.position.x, cameraRig.position.y, cameraRig.position.z);
-
     // VR A-button (button 4) on right controller to interact with NPC
     const session = renderer.xr.getSession();
     if (session) {
@@ -859,16 +1015,34 @@ function animate() {
     euler.set(pitch, yaw, 0);
     camera.quaternion.setFromEuler(euler);
 
-    sunLight.position.set(camera.position.x + 300, 400, camera.position.z + 200);
-    sunLight.target.position.set(camera.position.x, camera.position.y, camera.position.z);
-
     hudPos.textContent = `${camera.position.x.toFixed(0)}, ${camera.position.z.toFixed(0)}`;
     hudDir.textContent = getCardinal(yaw);
     hudAlt.textContent = (camera.position.y - PLAYER_HEIGHT).toFixed(1);
   }
 
+  // Day/night cycle
+  const pp = inVR ? cameraRig.position : camera.position;
+  updateDayNight(dt, pp.x, pp.z);
+  if (!inVR) {
+    const totalMin = Math.floor(timeOfDay * 1440);
+    hudTime.textContent = `${String(Math.floor(totalMin/60)).padStart(2,'0')}:${String(totalMin%60).padStart(2,'0')}`;
+  }
+
+  // Minimap (desktop only)
+  minimapCanvas.style.display = inVR ? 'none' : 'block';
+  if (!inVR) drawMinimap();
+
+  // Update gems
+  updateGems(dt, clock.elapsedTime);
+
   // Update NPCs
   updateNPCs(dt);
+
+  // Animate water UV
+  waterGeo.attributes.uv.array[0] += dt * 0.02; waterGeo.attributes.uv.array[2] += dt * 0.02;
+  waterGeo.attributes.uv.array[4] += dt * 0.02; waterGeo.attributes.uv.array[6] += dt * 0.02;
+  waterGeo.attributes.uv.needsUpdate = true;
+  waterPlane.position.y = -2 + Math.sin(clock.elapsedTime * 0.5) * 0.3;
 
   // Animate clouds
   for (const cloud of clouds) {
