@@ -460,17 +460,28 @@ function updateDayNight(dt, playerX, playerZ) {
   const horizonFactor = 1 - Math.abs(sunUp);
   const sunColor = new THREE.Color().setHSL(0.1 - horizonFactor * 0.07, 0.6 + horizonFactor * 0.3, 0.5 + dayFactor * 0.4);
   sunLight.color.copy(sunColor);
-  // Sky color
-  const nightSky = new THREE.Color(0x0a0a2a);
+  // Sky color with color temperature
+  const nightSky = new THREE.Color(0x080820);
   const daySky = new THREE.Color(0x87CEEB);
-  const dawnSky = new THREE.Color(0xe8836b);
+  const sunsetSky = new THREE.Color(0xE8734A);
+  // Compute sunset factor: peaks at t=0.25 (sunrise) and t=0.75 (sunset)
+  const distSunrise = Math.abs(t - 0.25), distSunset = Math.abs(t - 0.75);
+  const sunsetFactor = Math.max(1 - distSunrise / 0.06, 1 - distSunset / 0.06, 0);
   let skyColor;
-  if (dayFactor > 0.5) skyColor = daySky.clone();
-  else if (dayFactor > 0.05) skyColor = nightSky.clone().lerp(dawnSky, dayFactor * 2).lerp(daySky, Math.max(0, (dayFactor - 0.25) * 4));
+  if (dayFactor > 0.3) skyColor = daySky.clone().lerp(sunsetSky, sunsetFactor);
+  else if (dayFactor > 0.02) skyColor = nightSky.clone().lerp(sunsetSky, Math.min(dayFactor * 3, 1)).lerp(daySky, Math.max(0, (dayFactor - 0.15) * 5));
   else skyColor = nightSky.clone();
+  if (sunsetFactor > 0) skyColor.lerp(sunsetSky, sunsetFactor * 0.6);
+  renderer.setClearColor(skyColor);
   scene.background.copy(skyColor);
   scene.fog.color.copy(skyColor);
-  // Ambient
+  // Ambient color temperature: warm day, orange sunset, cool night
+  const warmAmbient = new THREE.Color(0xffd4a0);
+  const coolAmbient = new THREE.Color(0x4466aa);
+  const orangeAmbient = new THREE.Color(0xff8844);
+  const ambColor = coolAmbient.clone().lerp(warmAmbient, dayFactor);
+  if (sunsetFactor > 0) ambColor.lerp(orangeAmbient, sunsetFactor * 0.7);
+  ambientLight.color.copy(ambColor);
   ambientLight.intensity = 0.15 + dayFactor * 0.55;
   // Moon
   moonLight.intensity = (1 - dayFactor) * 0.4;
