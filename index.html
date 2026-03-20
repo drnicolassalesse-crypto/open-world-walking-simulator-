@@ -97,6 +97,8 @@
     font-family: inherit; font-size: 13px; transition: background 0.2s;
   }
   #npc-dialog button:hover { background: rgba(255,255,255,0.25); }
+  #dialog-choices { margin-top: 10px; display: none; }
+  #dialog-choices button { margin: 4px 6px; padding: 6px 18px; font-size: 12px; }
 
   #minimap {
     position: fixed; bottom: 20px; right: 20px; z-index: 50;
@@ -207,6 +209,7 @@
   <div class="dialog-box">
     <div class="npc-name" id="dialog-name"></div>
     <div class="npc-msg" id="dialog-msg"></div>
+    <div id="dialog-choices"><button id="dialog-c1">[1] Quest Hint</button><button id="dialog-c2">[2] Lore</button></div>
     <button id="dialog-close">Close</button>
   </div>
 </div>
@@ -1039,7 +1042,7 @@ function updateDeer(dt) {
   }
   scene.add(islandGroup);
   // Wizard NPC on island
-  npcDefs.push({ name:'Zephyr', color:0x9B59B6, msgs:['You found the sky island! The view from up here is breathtaking.','The clouds are so close I can almost touch them.','Few have made it this high. You are special.'] });
+  npcDefs.push({ name:'Zephyr', color:0x9B59B6, msgs:['You found the sky island! The view from up here is breathtaking.','The clouds are so close I can almost touch them.','Few have made it this high. You are special.'], hint:'There is a special gem hidden on this very island.', lore:'This island was lifted by ancient magic millennia ago.' });
   const zd = npcDefs[npcDefs.length - 1], zg = new THREE.Group();
   const zMat = new THREE.MeshStandardMaterial({ color: zd.color, roughness: 0.7 });
   const zBody = new THREE.Mesh(new THREE.CapsuleGeometry(0.45, 1.2, 4, 8), zMat);
@@ -1138,22 +1141,33 @@ function updateGems(dt, elapsed) {
 
 // ── NPCs ──────────────────────────────────────────────────────────
 const NPC_DIST = 5, npcs = [], npcDefs = [
-  { name:'Elara', color:0xE84393, msgs:['The sunset from the hilltop is breathtaking.','Have you seen the flowers by the valley?','I come here to think. It\'s peaceful.'] },
-  { name:'Finn', color:0x0984E3, msgs:['Watch your step on the slopes!','I\'ve been mapping these hills for years.','There\'s a great view to the north.'] },
-  { name:'Sage', color:0x6C5CE7, msgs:['The wind carries stories, if you listen.','Every rock here has a history.','I wonder what lies beyond the fog.'] },
-  { name:'Rowan', color:0x00B894, msgs:['These trees have been here for centuries.','I planted a garden just over that ridge.','Nature always finds a way.'] },
-  { name:'Mira', color:0xFDCB6E, msgs:['Hello, traveler! Beautiful day, isn\'t it?','I love how the light changes here.','Have you explored the eastern hills yet?'] },
+  { name:'Elara', color:0xE84393, msgs:['The sunset from the hilltop is breathtaking.','Have you seen the flowers by the valley?','I come here to think. It\'s peaceful.'], hint:'Gems glow brighter at dawn — check the eastern ridge.', lore:'This valley was once a lake, thousands of years ago.' },
+  { name:'Finn', color:0x0984E3, msgs:['Watch your step on the slopes!','I\'ve been mapping these hills for years.','There\'s a great view to the north.'], hint:'The floating island can be reached by jumping from the high cliff.', lore:'These hills were formed by ancient glaciers retreating north.' },
+  { name:'Sage', color:0x6C5CE7, msgs:['The wind carries stories, if you listen.','Every rock here has a history.','I wonder what lies beyond the fog.'], hint:'Campfires mark safe resting spots — check near the spawn.', lore:'Legend says a wizard once lived on a floating island above.' },
+  { name:'Rowan', color:0x00B894, msgs:['These trees have been here for centuries.','I planted a garden just over that ridge.','Nature always finds a way.'], hint:'Deer are shy but they lead you to hidden coin stashes.', lore:'The oldest tree here is said to be over a thousand years old.' },
+  { name:'Mira', color:0xFDCB6E, msgs:['Hello, traveler! Beautiful day, isn\'t it?','I love how the light changes here.','Have you explored the eastern hills yet?'], hint:'Coins are scattered near flowers — look for golden glints.', lore:'The day-night cycle here lasts exactly five minutes.' },
 ];
 const npcDialog = document.getElementById('npc-dialog');
 const dialogName = document.getElementById('dialog-name');
 const dialogMsg = document.getElementById('dialog-msg');
 const interactHint = document.getElementById('interact-hint');
-let dialogOpen = false, nearestNPC = null;
+let dialogOpen = false, nearestNPC = null, dialogNPC = null, dialogShowingChoice = false;
+const dialogChoices = document.getElementById('dialog-choices');
 
-document.getElementById('dialog-close').addEventListener('click', () => {
-  npcDialog.style.display = 'none'; dialogOpen = false;
+function closeDialog() {
+  npcDialog.style.display = 'none'; dialogOpen = false; dialogShowingChoice = false;
+  dialogChoices.style.display = 'none';
   if (!inVR) renderer.domElement.requestPointerLock();
-});
+}
+document.getElementById('dialog-close').addEventListener('click', closeDialog);
+
+function handleDialogChoice(choice) {
+  if (!dialogNPC || !dialogShowingChoice) return;
+  dialogMsg.textContent = choice === 1 ? (dialogNPC.def.hint || 'No hint available.') : (dialogNPC.def.lore || 'No lore available.');
+  dialogChoices.style.display = 'none'; dialogShowingChoice = false;
+}
+document.getElementById('dialog-c1').addEventListener('click', () => handleDialogChoice(1));
+document.getElementById('dialog-c2').addEventListener('click', () => handleDialogChoice(2));
 
 function makeNameSprite(name) {
   const c = document.createElement('canvas'); c.width = 256; c.height = 64;
@@ -1188,14 +1202,13 @@ for (let i = 0; i < npcDefs.length; i++) {
 }
 
 function openNPCDialog(npc) {
-  dialogOpen = true;
+  dialogOpen = true; dialogNPC = npc; dialogShowingChoice = false;
+  dialogChoices.style.display = 'none';
   dialogName.textContent = npc.def.name;
   if (npc.questState === 'idle') {
-    // First interaction: give quest
     dialogMsg.textContent = `Can you collect ${npc.questGemsNeeded} gems for me?`;
     npc.questState = 'quest_given';
   } else if (npc.questState === 'quest_given' && gemsCollected >= npc.questGemsNeeded) {
-    // Player has enough gems: reward
     gemsCollected += 5;
     document.getElementById('hud-gems').textContent = `${gemsCollected} / ${GEM_COUNT}`;
     dialogMsg.textContent = 'Thank you! Here is your reward: +5 gems to your count!';
@@ -1203,7 +1216,11 @@ function openNPCDialog(npc) {
   } else if (npc.questState === 'quest_given') {
     dialogMsg.textContent = `I need ${npc.questGemsNeeded} gems. You only have ${gemsCollected} so far. Keep looking!`;
   } else {
-    dialogMsg.textContent = npc.def.msgs[npc.msgIdx++ % npc.def.msgs.length];
+    const idx = npc.msgIdx++ % npc.def.msgs.length;
+    dialogMsg.textContent = npc.def.msgs[idx];
+    if (idx === 1 && (npc.def.hint || npc.def.lore)) {
+      dialogChoices.style.display = 'block'; dialogShowingChoice = true;
+    }
   }
   npcDialog.style.display = 'flex';
   if (!inVR) document.exitPointerLock();
@@ -1321,7 +1338,13 @@ document.getElementById('pause-reset').addEventListener('click', () => {
 });
 
 document.addEventListener('keydown', (e) => {
+  if (e.code === 'Escape' && dialogOpen) { closeDialog(); return; }
   if (e.code === 'Escape' && !dialogOpen) { e.preventDefault(); togglePause(); return; }
+  if (dialogOpen && dialogShowingChoice) {
+    if (e.code === 'Digit1') handleDialogChoice(1);
+    if (e.code === 'Digit2') handleDialogChoice(2);
+    return;
+  }
   if (gamePaused) return;
   keys[e.code] = true;
   if (e.code === 'KeyE' && nearestNPC && !dialogOpen) openNPCDialog(nearestNPC);
