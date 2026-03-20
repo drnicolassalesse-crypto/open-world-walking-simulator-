@@ -1804,10 +1804,18 @@ for (let i = 0; i < npcDefs.length; i++) {
   const px = Math.cos(ang) * rad, pz = Math.sin(ang) * rad;
   g.position.set(px, getTerrainHeight(px, pz), pz);
   scene.add(g);
+  // Find nearest campfire for night schedule
+  let nearCF = campfirePositions[0], ncDist = Infinity;
+  for (const cf of campfirePositions) {
+    const d2 = (px-cf[0])**2 + (pz-cf[2])**2;
+    if (d2 < ncDist) { ncDist = d2; nearCF = cf; }
+  }
   npcs.push({ group: g, bodyMat: bMat, def: d, msgIdx: 0,
     walkDir: new THREE.Vector3(Math.random()-0.5, 0, Math.random()-0.5).normalize(),
     walkTimer: 3 + Math.random() * 2, pauseTimer: 0, isWalking: true, highlighted: false,
-    questState: 'idle', questGemsNeeded: 3 });
+    questState: 'idle', questGemsNeeded: 3,
+    dayPos: new THREE.Vector3(px, 0, pz), campPos: new THREE.Vector3(nearCF[0]+Math.random()*3-1.5, 0, nearCF[2]+Math.random()*3-1.5),
+    schedule: 'day' });
 }
 
 function openNPCDialog(npc) {
@@ -1838,15 +1846,37 @@ function openNPCDialog(npc) {
 function updateNPCs(dt) {
   const pp = inVR ? cameraRig.position : camera.position;
   nearestNPC = null; let nearD = Infinity;
+  const t = timeOfDay;
   for (const n of npcs) {
     const p = n.group.position;
-    if (n.isWalking) {
-      p.x += n.walkDir.x * 2.5 * dt; p.z += n.walkDir.z * 2.5 * dt;
-      p.y = getTerrainHeight(p.x, p.z);
-      if ((n.walkTimer -= dt) <= 0) { n.isWalking = false; n.pauseTimer = 1.5 + Math.random() * 2; }
-    } else if ((n.pauseTimer -= dt) <= 0) {
-      n.isWalking = true; n.walkTimer = 3 + Math.random() * 2;
-      n.walkDir.set(Math.random()-0.5, 0, Math.random()-0.5).normalize();
+    // Schedule-based movement (skip Zephyr — no dayPos)
+    if (n.dayPos) {
+      const isNight = t > 0.85 || t < 0.25;
+      const isEvening = t >= 0.75 && t <= 0.85;
+      const isMorning = t >= 0.25 && t < 0.3;
+      const target = (isNight || isEvening) ? n.campPos : n.dayPos;
+      const tdx = target.x - p.x, tdz = target.z - p.z, td = Math.sqrt(tdx*tdx+tdz*tdz);
+      if (td > 1) { p.x += (tdx/td)*5*dt; p.z += (tdz/td)*5*dt; p.y = getTerrainHeight(p.x, p.z); }
+      if (isNight && td < 2) { n.isWalking = false; } // sit still at night
+      else if (!isNight && !isEvening) {
+        // Day: normal wander
+        if (n.isWalking) {
+          p.x += n.walkDir.x*2.5*dt; p.z += n.walkDir.z*2.5*dt; p.y = getTerrainHeight(p.x, p.z);
+          if ((n.walkTimer -= dt) <= 0) { n.isWalking = false; n.pauseTimer = 1.5+Math.random()*2; }
+        } else if ((n.pauseTimer -= dt) <= 0) {
+          n.isWalking = true; n.walkTimer = 3+Math.random()*2;
+          n.walkDir.set(Math.random()-0.5,0,Math.random()-0.5).normalize();
+        }
+      }
+    } else {
+      // Zephyr or NPCs without schedule — original behavior
+      if (n.isWalking) {
+        p.x += n.walkDir.x*2.5*dt; p.z += n.walkDir.z*2.5*dt; p.y = getTerrainHeight(p.x, p.z);
+        if ((n.walkTimer -= dt) <= 0) { n.isWalking = false; n.pauseTimer = 1.5+Math.random()*2; }
+      } else if ((n.pauseTimer -= dt) <= 0) {
+        n.isWalking = true; n.walkTimer = 3+Math.random()*2;
+        n.walkDir.set(Math.random()-0.5,0,Math.random()-0.5).normalize();
+      }
     }
     const dx = pp.x - p.x, dz = pp.z - p.z, dist = Math.sqrt(dx*dx + dz*dz);
     if (dist < NPC_DIST) { n.group.rotation.y = Math.atan2(dx, dz); n.isWalking = false; }
