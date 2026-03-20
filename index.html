@@ -238,7 +238,8 @@
   <span class="label">GEMS</span> <span id="hud-gems">0 / 15</span><br>
   <span class="label">SKY</span> <span id="hud-weather">☀️ Clear</span><br>
   <span class="label">DEER</span> <span id="hud-deer">0 scared</span><br>
-  <span class="label">FISH</span> <span id="hud-fish">0 caught</span>
+  <span class="label">FISH</span> <span id="hud-fish">0 caught</span><br>
+  <span class="label">SND</span> <span id="hud-sound">ON</span>
   <div id="stamina-bar"><div id="stamina-fill" style="background:#4CAF50"></div></div>
 </div>
 
@@ -1740,6 +1741,7 @@ document.getElementById('pause-reset').addEventListener('click', () => {
 document.addEventListener('keydown', (e) => {
   if (e.code === 'KeyI') { toggleInventory(); return; }
   if (e.code === 'KeyQ') { toggleQuestLog(); return; }
+  if (e.code === 'KeyM') { toggleMute(); return; }
   if (e.code === 'Escape' && questLogOpen) { toggleQuestLog(); return; }
   if (e.code === 'Escape' && inventoryOpen) { toggleInventory(); return; }
   if (e.code === 'Escape' && dialogOpen) { closeDialog(); return; }
@@ -1759,6 +1761,50 @@ document.addEventListener('keyup', (e) => { keys[e.code] = false; });
 
 // Initialize VR (async check, button setup)
 initVR();
+
+// ── Ambient Soundtrack ──────────────────────────────────────────
+let audioCtx = null, audioMuted = false, audioStarted = false;
+let dayOsc, nightOsc, forestOsc, dayGain, nightGain, forestGain, masterGain;
+
+function initAudio() {
+  if (audioStarted) return;
+  audioStarted = true;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  masterGain = audioCtx.createGain(); masterGain.gain.value = 1; masterGain.connect(audioCtx.destination);
+  // Day drone: 432Hz sine
+  dayOsc = audioCtx.createOscillator(); dayOsc.type = 'sine'; dayOsc.frequency.value = 432;
+  dayGain = audioCtx.createGain(); dayGain.gain.value = 0; dayOsc.connect(dayGain); dayGain.connect(masterGain); dayOsc.start();
+  // Night drone: 220Hz sine
+  nightOsc = audioCtx.createOscillator(); nightOsc.type = 'sine'; nightOsc.frequency.value = 220;
+  nightGain = audioCtx.createGain(); nightGain.gain.value = 0; nightOsc.connect(nightGain); nightGain.connect(masterGain); nightOsc.start();
+  // Forest drone: 528Hz triangle
+  forestOsc = audioCtx.createOscillator(); forestOsc.type = 'triangle'; forestOsc.frequency.value = 528;
+  forestGain = audioCtx.createGain(); forestGain.gain.value = 0; forestOsc.connect(forestGain); forestGain.connect(masterGain); forestOsc.start();
+}
+
+function updateAudio(dt) {
+  if (!audioStarted || audioMuted) return;
+  const pp = inVR ? cameraRig.position : camera.position;
+  // Day/night crossfade based on timeOfDay
+  const sunAngle = (timeOfDay - 0.25) * Math.PI * 2;
+  const dayFactor = THREE.MathUtils.clamp(Math.sin(sunAngle) * 3, 0, 1);
+  dayGain.gain.value += (dayFactor * 0.02 - dayGain.gain.value) * 2 * dt;
+  nightGain.gain.value += ((1 - dayFactor) * 0.02 - nightGain.gain.value) * 2 * dt;
+  // Forest zone: x in [-60,-10], z in [-60,10]
+  const inForest = pp.x > -60 && pp.x < -10 && pp.z > -60 && pp.z < 10;
+  forestGain.gain.value += ((inForest ? 0.015 : 0) - forestGain.gain.value) * 2 * dt;
+}
+
+function toggleMute() {
+  audioMuted = !audioMuted;
+  if (audioStarted) masterGain.gain.value = audioMuted ? 0 : 1;
+  document.getElementById('hud-sound').textContent = audioMuted ? 'OFF' : 'ON';
+}
+
+// Start audio on first interaction
+const startAudioOnce = () => { initAudio(); document.removeEventListener('click', startAudioOnce); document.removeEventListener('keydown', startAudioOnce); };
+document.addEventListener('click', startAudioOnce);
+document.addEventListener('keydown', startAudioOnce);
 
 // ── Animation loop ─────────────────────────────────────────────────
 const clock = new THREE.Clock();
@@ -1930,6 +1976,7 @@ function animate() {
   updateChest(dt);
   updateTorches();
   updateParticles(dt);
+  updateAudio(dt);
 
   // Animate water UV
   waterGeo.attributes.uv.array[0] += dt * 0.02; waterGeo.attributes.uv.array[2] += dt * 0.02;
