@@ -520,7 +520,7 @@ scene.add(sunMesh);
 
 // ── Day/Night Cycle ─────────────────────────────────────────────────
 let timeOfDay = 0.3; // 0-1, 0.3=morning, 0.5=noon, 0=midnight
-const DAY_DURATION = 300; // 5 minutes real time = 1 full day
+const DAY_DURATION = 7200; // 2 hours real time = 1 full day
 const moonLight = new THREE.PointLight(0x8888ff, 0, 500);
 moonLight.position.set(0, 300, 0);
 scene.add(moonLight);
