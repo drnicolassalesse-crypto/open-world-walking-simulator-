@@ -225,6 +225,8 @@
   #achieve-panel h3 { font-size:16px;font-weight:300;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:12px;text-align:center;color:#FFD700; }
   .ach-row{margin-bottom:8px;} .ach-name{font-size:12px;font-weight:bold;} .ach-desc{font-size:10px;color:rgba(255,255,255,0.5);} .ach-bar{height:4px;background:rgba(255,255,255,0.1);border-radius:2px;margin-top:2px;overflow:hidden;} .ach-bar-fill{height:100%;border-radius:2px;} .ach-status{float:right;font-size:10px;}
   #achieve-banner{position:fixed;top:-50px;left:50%;transform:translateX(-50%);z-index:500;color:#FFD700;font-size:15px;font-weight:bold;background:rgba(0,0,0,0.7);backdrop-filter:blur(6px);border:1px solid rgba(255,215,0,0.4);border-radius:10px;padding:10px 24px;transition:top 0.5s ease;pointer-events:none;}
+  #photo-overlay{position:fixed;top:0;left:0;width:100%;height:100%;z-index:400;display:none;pointer-events:none;}
+  #photo-label{position:fixed;top:20px;left:20px;z-index:401;display:none;color:rgba(255,255,255,0.7);font-size:13px;letter-spacing:2px;text-transform:uppercase;pointer-events:none;}
   #stats-hud{position:fixed;bottom:20px;left:20px;z-index:50;background:rgba(0,0,0,0.45);backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:6px 12px;color:#ddd;font-size:12px;line-height:1.6;pointer-events:none;}
   #stats-hud .stat-label{color:rgba(255,255,255,0.4);font-size:10px;text-transform:uppercase;letter-spacing:1px;margin-right:4px;}
   #zoom-vignette{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:40;display:none;background:radial-gradient(ellipse at center,transparent 50%,rgba(0,0,0,0.7) 85%,rgba(0,0,0,0.95) 100%);}
@@ -304,6 +306,7 @@
 <div id="achieve-panel"><h3>Achievements</h3><div id="ach-list"></div></div>
 <div id="achieve-banner"></div>
 <div id="zoom-vignette"></div><div id="zoom-hud"></div>
+<div id="photo-overlay"></div><div id="photo-label">PHOTO MODE — Press P to exit</div>
 <div id="stats-hud"><span class="stat-label">SEASON</span><span id="stat-season">☀️ Summer</span><br><span class="stat-label">CLOCK</span><span id="stat-time">12:00</span><br><span class="stat-label">WEATHER</span><span id="stat-weather">Clear</span></div>
 <div id="quest-log"><h3>Quest Log</h3><div id="quest-list"></div></div>
 
@@ -1107,6 +1110,45 @@ function updateCampfires(dt, elapsed) {
         p.material.opacity = 0.8;
       }
     }
+  }
+}
+
+// ── Interactive Campfire ─────────────────────────────────────────
+let playerSitting = false;
+const icfPos = new THREE.Vector3(5, getTerrainHeight(5, 5), 5);
+const icfGroup = new THREE.Group(); icfGroup.position.copy(icfPos);
+for (let i = 0; i < 6; i++) {
+  const a = (i/6)*Math.PI*2, log = new THREE.Mesh(logGeo, logMat);
+  log.position.set(Math.cos(a)*0.5, 0.12, Math.sin(a)*0.5);
+  log.rotation.set(0.3, a, Math.PI/2); icfGroup.add(log);
+}
+const icfLight = new THREE.PointLight(0xff6600, 2.5, 20);
+icfLight.position.set(0, 1, 0); icfGroup.add(icfLight);
+const icfOrbs = [];
+const orbGeo = new THREE.SphereGeometry(0.12, 6, 4);
+for (let i = 0; i < 6; i++) {
+  const orb = new THREE.Mesh(orbGeo, new THREE.MeshBasicMaterial({ color: i%2?0xff8800:0xffcc00, transparent:true, opacity:0.8, depthWrite:false }));
+  orb.userData.angle = (i/6)*Math.PI*2; orb.userData.speed = 0.5+Math.random()*0.5;
+  orb.userData.radius = 0.3+Math.random()*0.2; orb.position.y = 0.5+Math.random()*0.8;
+  icfGroup.add(orb); icfOrbs.push(orb);
+}
+scene.add(icfGroup);
+
+function updateInteractiveCampfire(dt, elapsed) {
+  icfLight.intensity = 2 + Math.random() * 1.5;
+  for (const o of icfOrbs) {
+    o.userData.angle += o.userData.speed * dt;
+    o.position.x = Math.cos(o.userData.angle) * o.userData.radius;
+    o.position.z = Math.sin(o.userData.angle) * o.userData.radius;
+    o.position.y = 0.4 + Math.sin(elapsed * 2 + o.userData.angle) * 0.4;
+  }
+  const pp = inVR ? cameraRig.position : camera.position;
+  const dx = pp.x - icfPos.x, dz = pp.z - icfPos.z, dist = Math.sqrt(dx*dx+dz*dz);
+  const hint = document.getElementById('interact-hint');
+  if (dist < 8 && !playerSitting && !nearestNPC) {
+    hint.textContent = 'Press F to sit'; hint.style.display = 'block';
+  } else if (playerSitting) {
+    hint.textContent = 'Press F to stand'; hint.style.display = 'block';
   }
 }
 
@@ -1994,6 +2036,8 @@ document.getElementById('pause-reset').addEventListener('click', () => {
 });
 
 document.addEventListener('keydown', (e) => {
+  if (e.code === 'KeyP' && !inVR) { togglePhotoMode(); return; }
+  if (e.code === 'Escape' && photoMode) { togglePhotoMode(); return; }
   if (e.code === 'KeyI') { toggleInventory(); return; }
   if (e.code === 'KeyQ') { toggleQuestLog(); return; }
   if (e.code === 'KeyM') { toggleMute(); return; }
@@ -2013,7 +2057,7 @@ document.addEventListener('keydown', (e) => {
   if (gamePaused) return;
   keys[e.code] = true;
   if (e.code === 'KeyE' && nearestNPC && !dialogOpen) openNPCDialog(nearestNPC);
-  if (e.code === 'KeyF') tryFish();
+  if (e.code === 'KeyF') { const dx=camera.position.x-icfPos.x,dz=camera.position.z-icfPos.z; if(Math.sqrt(dx*dx+dz*dz)<8||playerSitting){playerSitting=!playerSitting; if(playerSitting)pitch=-0.3;} else tryFish(); }
   if (e.code === 'KeyN') toggleSnow();
   if (e.code === 'KeyZ' && !zHeld) { zHeld=true; zoomLevel=3; targetFOV=ZOOM_FOVS[3]; }
   if (e.code === 'Space' && onGround) { velocityY = 8; onGround = false; }
@@ -2026,7 +2070,7 @@ initVR();
 // ── Ambient Soundtrack ──────────────────────────────────────────
 let audioCtx = null, audioMuted = false, audioStarted = false;
 let dayOsc, nightOsc, forestOsc, dayGain, nightGain, forestGain, masterGain;
-let cricketGains = [], windGain, birdGain, birdOsc, winterWindGain, winterWindBpf;
+let cricketGains = [], windGain, birdGain, birdOsc, winterWindGain, winterWindBpf, crackleGain;
 
 function initAudio() {
   if (audioStarted) return;
@@ -2077,6 +2121,13 @@ function initAudio() {
   winterWindGain = audioCtx.createGain(); winterWindGain.gain.value = 0;
   const wwPan = audioCtx.createStereoPanner(); wwPan.pan.value = -0.4;
   wwSrc.connect(winterWindBpf); winterWindBpf.connect(winterWindGain); winterWindGain.connect(wwPan); wwPan.connect(masterGain); wwSrc.start();
+  // Campfire crackle: filtered noise bursts
+  const crBuf = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
+  const crD = crBuf.getChannelData(0); for(let i=0;i<bufSize;i++) crD[i]=(Math.random()*2-1)*(Math.random()>0.95?1:0.05);
+  const crSrc = audioCtx.createBufferSource(); crSrc.buffer=crBuf; crSrc.loop=true;
+  const crBpf = audioCtx.createBiquadFilter(); crBpf.type='highpass'; crBpf.frequency.value=800;
+  crackleGain = audioCtx.createGain(); crackleGain.gain.value=0;
+  crSrc.connect(crBpf); crBpf.connect(crackleGain); crackleGain.connect(masterGain); crSrc.start();
   // Waterfall: white noise through 200Hz bandpass
   const wfBuf = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
   const wfD = wfBuf.getChannelData(0); for (let i = 0; i < bufSize; i++) wfD[i] = Math.random()*2-1;
@@ -2108,6 +2159,8 @@ function updateAudio(dt) {
     const birdVol = Math.max(dawn, dusk) * (currentSeason === 'winter' ? 0.003 : 0.012);
     birdGain.gain.value += (birdVol - birdGain.gain.value) * 2 * dt;
   }
+  // Campfire crackle
+  if (crackleGain) { const cd=Math.sqrt((pp.x-icfPos.x)**2+(pp.z-icfPos.z)**2); crackleGain.gain.value+=(Math.max(0,1-cd/15)*0.025-crackleGain.gain.value)*2*dt; }
   // Winter wind howl
   if (winterWindGain) {
     const wwVol = currentSeason === 'winter' ? 0.03 * windStrength : 0;
@@ -2119,6 +2172,18 @@ function toggleMute() {
   audioMuted = !audioMuted;
   if (audioStarted) masterGain.gain.value = audioMuted ? 0 : 1;
   document.getElementById('hud-sound').textContent = audioMuted ? 'OFF' : 'ON';
+}
+
+// ── Footstep Sounds ─────────────────────────────────────────────
+let footstepTimer = 0;
+function playFootstep() {
+  if (!audioStarted || audioMuted || inVR) return;
+  const dur = 0.06, freq = currentSeason === 'winter' ? 1200 : 400;
+  const osc = audioCtx.createOscillator(); osc.type = 'triangle'; osc.frequency.value = freq + Math.random()*200;
+  const g = audioCtx.createGain(); g.gain.value = 0.015;
+  const bpf = audioCtx.createBiquadFilter(); bpf.type = 'bandpass'; bpf.frequency.value = freq; bpf.Q.value = 2;
+  osc.connect(bpf); bpf.connect(g); g.connect(masterGain); osc.start();
+  g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur); osc.stop(audioCtx.currentTime + dur);
 }
 
 // Start audio on first interaction
@@ -2312,6 +2377,18 @@ document.addEventListener('wheel', (e) => {
   targetFOV = ZOOM_FOVS[zoomLevel];
 }, { passive: true });
 
+// ── Photo Mode ──────────────────────────────────────────────────
+let photoMode = false;
+const photoHudEls = ['hud','coin-score','minimap','crosshair','stamina-bar','interact-hint','stats-hud','zoom-hud','zoom-vignette'];
+function togglePhotoMode() {
+  if (inVR) return;
+  photoMode = !photoMode;
+  document.getElementById('photo-overlay').style.display = photoMode ? 'block' : 'none';
+  document.getElementById('photo-label').style.display = photoMode ? 'block' : 'none';
+  for (const id of photoHudEls) { const el = document.getElementById(id); if (el) el.style.display = photoMode ? 'none' : ''; }
+  if (!photoMode && !gamePaused) renderer.domElement.requestPointerLock();
+}
+
 // ── Animation loop ─────────────────────────────────────────────────
 const clock = new THREE.Clock();
 let prevTerrainY = getTerrainHeight(0, 0);
@@ -2399,6 +2476,7 @@ function animate() {
     }
   } else if (isLocked) {
     // ── Desktop locomotion ──
+    if (playerSitting || photoMode) { velocity.x = 0; velocity.z = 0; }
     const wantSprint = keys['ShiftLeft'] || keys['ShiftRight'];
     const canSprint = wantSprint && !sprintLocked && stamina > 0;
     const speed = canSprint ? RUN_SPEED : WALK_SPEED;
@@ -2424,6 +2502,11 @@ function animate() {
 
     camera.position.x += velocity.x * dt;
     camera.position.z += velocity.z * dt;
+    // Footstep sounds
+    if (direction.length() > 0 && onGround) {
+      footstepTimer -= dt; const interval = canSprint ? 0.25 : 0.45;
+      if (footstepTimer <= 0) { playFootstep(); footstepTimer = interval; }
+    } else footstepTimer = 0;
 
     const halfSize = TERRAIN_SIZE * 0.49;
     camera.position.x = THREE.MathUtils.clamp(camera.position.x, -halfSize, halfSize);
@@ -2485,6 +2568,7 @@ function animate() {
 
   // Campfires & Fireflies
   updateCampfires(dt, clock.elapsedTime);
+  updateInteractiveCampfire(dt, clock.elapsedTime);
   updateFireflies(dt, clock.elapsedTime);
 
   // Minimap (desktop only)
