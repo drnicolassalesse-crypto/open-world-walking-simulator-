@@ -263,6 +263,7 @@
   <span class="label">SKY</span> <span id="hud-weather">☀️ Clear</span><br>
   <span class="label">DEER</span> <span id="hud-deer">0 scared</span><br>
   <span class="label">FISH</span> <span id="hud-fish">0 caught</span><br>
+  <span class="label">WIND</span> <span id="hud-wind">→ 0.0</span><br>
   <span class="label">SND</span> <span id="hud-sound">ON</span><br>
   <span class="label">BEST</span> <span id="hud-best">0</span>
   <div id="stamina-bar"><div id="stamina-fill" style="background:#4CAF50"></div></div>
@@ -927,6 +928,11 @@ function createGrassPatches() {
   grass.instanceColor.needsUpdate = true;
   scene.add(grass);
   grassInstMesh = grass;
+  grassInstMesh.userData.baseMatrices = new Float32Array(GRASS_PATCH_COUNT * 16);
+  for (let i = 0; i < GRASS_PATCH_COUNT; i++) {
+    const m = new THREE.Matrix4(); grass.getMatrixAt(i, m);
+    grassInstMesh.userData.baseMatrices.set(m.elements, i * 16);
+  }
 }
 
 createGrassPatches();
@@ -2225,8 +2231,8 @@ function updateSnow(dt) {
   const pp = inVR ? cameraRig.position : camera.position;
   for (const s of snowFlakes) {
     s.position.y += s.userData.vy * dt;
-    s.position.x += s.userData.vx * dt;
-    s.position.z += s.userData.vz * dt;
+    s.position.x += (s.userData.vx + Math.cos(windAngle)*windStrength*0.5) * dt;
+    s.position.z += (s.userData.vz + Math.sin(windAngle)*windStrength*0.5) * dt;
     const th = getTerrainHeight(s.position.x, s.position.z);
     if (s.position.y < th) {
       s.position.set(pp.x+(Math.random()-0.5)*60, pp.y+30+Math.random()*20, pp.z+(Math.random()-0.5)*60);
@@ -2235,6 +2241,32 @@ function updateSnow(dt) {
       s.userData.vz = (Math.random()-0.5)*0.3;
     }
   }
+}
+
+// ── Wind System ─────────────────────────────────────────────────
+let windAngle = 0, windStrength = 0.3;
+const hudWind = document.getElementById('hud-wind');
+function updateWind(dt, elapsed) {
+  windAngle = (elapsed * Math.PI * 2 / 300) % (Math.PI * 2); // 5 min full rotation
+  windStrength = 0.3 + 0.35 * (Math.sin(elapsed * 0.1) + 1);
+  const wx = Math.cos(windAngle) * windStrength, wz = Math.sin(windAngle) * windStrength;
+  // Bend grass
+  if (grassInstMesh && grassInstMesh.userData.baseMatrices) {
+    const bases = grassInstMesh.userData.baseMatrices;
+    const tilt = new THREE.Matrix4(), base = new THREE.Matrix4();
+    const bendX = wx * 0.15, bendZ = wz * 0.15;
+    for (let i = 0; i < GRASS_PATCH_COUNT; i++) {
+      base.fromArray(bases, i * 16);
+      tilt.makeRotationFromEuler(new THREE.Euler(bendZ, 0, -bendX));
+      tilt.multiply(base);
+      grassInstMesh.setMatrixAt(i, tilt);
+    }
+    grassInstMesh.instanceMatrix.needsUpdate = true;
+  }
+  // Wind HUD
+  const arrows = ['→','↗','↑','↖','←','↙','↓','↘'];
+  const idx = Math.round(((windAngle / (Math.PI*2)) * 8) % 8);
+  hudWind.textContent = `${arrows[idx]} ${windStrength.toFixed(1)}`;
 }
 
 // ── Binocular Zoom ──────────────────────────────────────────────
@@ -2439,6 +2471,7 @@ function animate() {
   updateSigns();
   updateMirrorLake();
   updateSnow(dt);
+  updateWind(dt, clock.elapsedTime);
 
   // Animate water UV
   waterGeo.attributes.uv.array[0] += dt * 0.02; waterGeo.attributes.uv.array[2] += dt * 0.02;
