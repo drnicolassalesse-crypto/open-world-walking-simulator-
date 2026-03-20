@@ -790,13 +790,28 @@ for (let i = 0; i < npcDefs.length; i++) {
   scene.add(g);
   npcs.push({ group: g, bodyMat: bMat, def: d, msgIdx: 0,
     walkDir: new THREE.Vector3(Math.random()-0.5, 0, Math.random()-0.5).normalize(),
-    walkTimer: 3 + Math.random() * 2, pauseTimer: 0, isWalking: true, highlighted: false });
+    walkTimer: 3 + Math.random() * 2, pauseTimer: 0, isWalking: true, highlighted: false,
+    questState: 'idle', questGemsNeeded: 3 });
 }
 
 function openNPCDialog(npc) {
   dialogOpen = true;
   dialogName.textContent = npc.def.name;
-  dialogMsg.textContent = npc.def.msgs[npc.msgIdx++ % npc.def.msgs.length];
+  if (npc.questState === 'idle') {
+    // First interaction: give quest
+    dialogMsg.textContent = `Can you collect ${npc.questGemsNeeded} gems for me?`;
+    npc.questState = 'quest_given';
+  } else if (npc.questState === 'quest_given' && gemsCollected >= npc.questGemsNeeded) {
+    // Player has enough gems: reward
+    gemsCollected += 5;
+    document.getElementById('hud-gems').textContent = `${gemsCollected} / ${GEM_COUNT}`;
+    dialogMsg.textContent = 'Thank you! Here is your reward: +5 gems to your count!';
+    npc.questState = 'idle';
+  } else if (npc.questState === 'quest_given') {
+    dialogMsg.textContent = `I need ${npc.questGemsNeeded} gems. You only have ${gemsCollected} so far. Keep looking!`;
+  } else {
+    dialogMsg.textContent = npc.def.msgs[npc.msgIdx++ % npc.def.msgs.length];
+  }
   npcDialog.style.display = 'flex';
   if (!inVR) document.exitPointerLock();
 }
