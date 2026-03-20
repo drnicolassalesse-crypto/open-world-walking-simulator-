@@ -49,11 +49,20 @@
   #crosshair {
     position: fixed; top: 50%; left: 50%;
     transform: translate(-50%, -50%);
-    width: 4px; height: 4px;
-    background: rgba(255,255,255,0.4);
-    border-radius: 50%; z-index: 50;
-    pointer-events: none;
+    z-index: 50; pointer-events: none;
   }
+  #crosshair .ch-h, #crosshair .ch-v {
+    position: absolute; background: rgba(255,255,255,0.7);
+  }
+  #crosshair .ch-h { width: 16px; height: 1px; top: 50%; left: 50%; transform: translate(-50%, -50%); }
+  #crosshair .ch-v { width: 1px; height: 16px; top: 50%; left: 50%; transform: translate(-50%, -50%); }
+  #crosshair .ch-dot { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: 4px; height: 4px; display: none; font-size: 8px; line-height: 4px; text-align: center; color: inherit; }
+  #crosshair.npc-near .ch-h, #crosshair.npc-near .ch-v { background: rgba(255,220,50,0.9); }
+  #crosshair.npc-near .ch-dot { display: block; }
+  #crosshair.gem-near .ch-h, #crosshair.gem-near .ch-v { background: rgba(80,255,80,0.9); }
+  #crosshair.gem-near { animation: ch-pulse 0.6s ease-in-out infinite alternate; }
+  @keyframes ch-pulse { from { transform: translate(-50%,-50%) scale(1); } to { transform: translate(-50%,-50%) scale(1.3); } }
 
   #vr-button {
     position: fixed; bottom: 20px; right: 20px; z-index: 200;
@@ -130,6 +139,24 @@
     background: #fff; opacity: 0; transition: opacity 0.1s;
   }
 
+  #pause-menu {
+    position: fixed; inset: 0; z-index: 400;
+    background: rgba(0,0,0,0.7); backdrop-filter: blur(8px);
+    display: none; align-items: center; justify-content: center;
+  }
+  #pause-menu .pause-card {
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 16px; padding: 36px 44px; text-align: center; color: #fff; max-width: 360px;
+  }
+  #pause-menu h2 { font-size: 24px; font-weight: 300; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 20px; }
+  #pause-menu .pause-btn {
+    display: block; width: 100%; margin: 8px 0; padding: 10px; cursor: pointer;
+    background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 8px; color: #fff; font-family: inherit; font-size: 14px; transition: background 0.2s;
+  }
+  #pause-menu .pause-btn:hover { background: rgba(255,255,255,0.2); }
+  #pause-controls { font-size: 12px; color: rgba(255,255,255,0.5); line-height: 1.8; margin-top: 12px; display: none; }
+
   #interact-hint {
     position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
     z-index: 50; color: rgba(255,255,255,0.8); font-size: 13px;
@@ -154,7 +181,7 @@
   </div>
 </div>
 
-<div id="crosshair"></div>
+<div id="crosshair"><div class="ch-h"></div><div class="ch-v"></div><div class="ch-dot">&#9670;</div></div>
 <button id="vr-button">Enter VR</button>
 
 <div id="hud">
@@ -172,6 +199,15 @@
     <div class="npc-name" id="dialog-name"></div>
     <div class="npc-msg" id="dialog-msg"></div>
     <button id="dialog-close">Close</button>
+  </div>
+</div>
+<div id="pause-menu">
+  <div class="pause-card">
+    <h2>Wanderer</h2>
+    <button class="pause-btn" id="pause-resume">Resume</button>
+    <button class="pause-btn" id="pause-controls-btn">Controls</button>
+    <button class="pause-btn" id="pause-reset">Reset Save</button>
+    <div id="pause-controls">WASD=move, Shift=sprint, Space=jump<br>E=talk, Tab=settings, Mouse=look<br>Esc=pause</div>
   </div>
 </div>
 <div id="rain-overlay"></div>
@@ -310,6 +346,8 @@ function getVRThumbstickAxes(handedness) {
 // ── Stamina ─────────────────────────────────────────────────────────
 let stamina = 100, sprintLocked = false;
 let velocityY = 0, onGround = true;
+let gamePaused = false;
+const pauseMenu = document.getElementById('pause-menu');
 const staminaFill = document.getElementById('stamina-fill');
 function getVRGripPressed() {
   const session = renderer.xr.getSession();
@@ -897,6 +935,55 @@ function updateCampfires(dt, elapsed) {
   }
 }
 
+// ── Floating Island ─────────────────────────────────────────────────
+{
+  const islandGroup = new THREE.Group();
+  islandGroup.position.set(150, 80, -120);
+  // Island body: flat-top cylinder with green top, brown sides
+  const islandGeo = new THREE.CylinderGeometry(40, 30, 15, 24);
+  const islandMats = [
+    new THREE.MeshStandardMaterial({ color: 0x6B4226, roughness: 0.9, flatShading: true }), // side
+    new THREE.MeshStandardMaterial({ color: 0x3A7D2A, roughness: 0.85 }), // top
+    new THREE.MeshStandardMaterial({ color: 0x5A3A1A, roughness: 0.95, flatShading: true }), // bottom
+  ];
+  const island = new THREE.Mesh(islandGeo, islandMats);
+  island.castShadow = true; island.receiveShadow = true;
+  islandGroup.add(island);
+  // Trees on island
+  const { trunk: iTrunk, foliage1: iF1, foliage2: iF2, foliage3: iF3 } = createTreeGeometry();
+  const iTrunkMat = new THREE.MeshStandardMaterial({ color: 0x5C3A1E, roughness: 0.95 });
+  const iLeafMat = new THREE.MeshStandardMaterial({ color: 0x2D5A1E, roughness: 0.85, flatShading: true });
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2, r = 8 + Math.random() * 20;
+    const tx = Math.cos(a) * r, tz = Math.sin(a) * r;
+    const tg = new THREE.Group();
+    tg.position.set(tx, 7.5, tz);
+    const s = 0.6 + Math.random() * 0.5;
+    tg.scale.set(s, s, s);
+    tg.add(new THREE.Mesh(iTrunk, iTrunkMat));
+    tg.add(new THREE.Mesh(iF1, iLeafMat));
+    tg.add(new THREE.Mesh(iF2, iLeafMat));
+    tg.add(new THREE.Mesh(iF3, iLeafMat));
+    tg.children.forEach(c => { c.castShadow = true; });
+    islandGroup.add(tg);
+  }
+  scene.add(islandGroup);
+  // Wizard NPC on island
+  npcDefs.push({ name:'Zephyr', color:0x9B59B6, msgs:['You found the sky island! The view from up here is breathtaking.','The clouds are so close I can almost touch them.','Few have made it this high. You are special.'] });
+  const zd = npcDefs[npcDefs.length - 1], zg = new THREE.Group();
+  const zMat = new THREE.MeshStandardMaterial({ color: zd.color, roughness: 0.7 });
+  const zBody = new THREE.Mesh(new THREE.CapsuleGeometry(0.45, 1.2, 4, 8), zMat);
+  zBody.position.y = 1.05; zBody.castShadow = true; zg.add(zBody);
+  const zHead = new THREE.Mesh(new THREE.SphereGeometry(0.35, 8, 6), new THREE.MeshStandardMaterial({ color: 0xFFDBAC, roughness: 0.6 }));
+  zHead.position.y = 2.1; zHead.castShadow = true; zg.add(zHead);
+  const zLabel = makeNameSprite('Zephyr'); zLabel.position.y = 3.0; zg.add(zLabel);
+  zg.position.set(150, 87.5, -120);
+  scene.add(zg);
+  npcs.push({ group: zg, bodyMat: zMat, def: zd, msgIdx: 0,
+    walkDir: new THREE.Vector3(0,0,0), walkTimer: 99, pauseTimer: 0, isWalking: false, highlighted: false,
+    questState: 'idle', questGemsNeeded: 5 });
+}
+
 // ── Collectible Gems ────────────────────────────────────────────────
 const GEM_COUNT = 15, GEM_COLLECT_DIST = 2;
 const gemColors = [0xff3333, 0x3399ff, 0x33cc66, 0xffcc00, 0xaa44ff];
@@ -913,6 +1000,14 @@ for (let i = 0; i < GEM_COUNT; i++) {
   mesh.castShadow = true;
   scene.add(mesh);
   gems.push({ mesh, baseY: mesh.position.y, collected: false });
+}
+// Special island gem
+{
+  const iGemMat = new THREE.MeshStandardMaterial({ color: 0xff00ff, emissive: 0xff00ff, emissiveIntensity: 0.8, roughness: 0.1, metalness: 0.6 });
+  const iGem = new THREE.Mesh(new THREE.OctahedronGeometry(0.7, 0), iGemMat);
+  iGem.position.set(150, 89.5, -120); iGem.castShadow = true;
+  scene.add(iGem);
+  gems.push({ mesh: iGem, baseY: 89.5, collected: false });
 }
 
 function updateGems(dt, elapsed) {
@@ -1101,13 +1196,32 @@ document.addEventListener('pointerlockchange', () => {
 });
 
 document.addEventListener('mousemove', (e) => {
-  if (!isLocked) return;
+  if (!isLocked || gamePaused) return;
   yaw -= e.movementX * MOUSE_SENSITIVITY;
   pitch -= e.movementY * MOUSE_SENSITIVITY;
   pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, pitch));
 });
 
+function togglePause() {
+  gamePaused = !gamePaused;
+  pauseMenu.style.display = gamePaused ? 'flex' : 'none';
+  if (gamePaused) { document.exitPointerLock(); }
+  else { renderer.domElement.requestPointerLock(); }
+}
+document.getElementById('pause-resume').addEventListener('click', togglePause);
+document.getElementById('pause-controls-btn').addEventListener('click', () => {
+  const el = document.getElementById('pause-controls');
+  el.style.display = el.style.display === 'block' ? 'none' : 'block';
+});
+document.getElementById('pause-reset').addEventListener('click', () => {
+  localStorage.removeItem('wanderer_save');
+  saveToast.style.opacity = '1'; saveToast.textContent = 'Save cleared';
+  setTimeout(() => { saveToast.style.opacity = '0'; saveToast.textContent = 'Game saved'; }, 2000);
+});
+
 document.addEventListener('keydown', (e) => {
+  if (e.code === 'Escape' && !dialogOpen) { e.preventDefault(); togglePause(); return; }
+  if (gamePaused) return;
   keys[e.code] = true;
   if (e.code === 'KeyE' && nearestNPC && !dialogOpen) openNPCDialog(nearestNPC);
   if (e.code === 'Space' && onGround) { velocityY = 8; onGround = false; }
@@ -1129,6 +1243,8 @@ function getCardinal(yaw) {
 
 function animate() {
   const dt = Math.min(clock.getDelta(), 0.1);
+
+  if (gamePaused) { renderer.render(scene, camera); return; }
 
   if (inVR) {
     // ── VR locomotion ──
@@ -1277,6 +1393,22 @@ function animate() {
   for (const cloud of clouds) {
     cloud.position.x += cloud.userData.speed * dt;
     if (cloud.position.x > 1000) cloud.position.x = -1000;
+  }
+
+  // Crosshair state
+  {
+    const ch = document.getElementById('crosshair');
+    ch.style.display = (inVR || gamePaused || dialogOpen) ? 'none' : 'block';
+    ch.classList.remove('npc-near', 'gem-near');
+    if (nearestNPC) ch.classList.add('npc-near');
+    else {
+      const cp = camera.position;
+      for (const g of gems) {
+        if (g.collected) continue;
+        const dx = cp.x - g.mesh.position.x, dz = cp.z - g.mesh.position.z;
+        if (Math.sqrt(dx*dx+dz*dz) < GEM_COLLECT_DIST) { ch.classList.add('gem-near'); break; }
+      }
+    }
   }
 
   // Auto-save every 10 seconds
