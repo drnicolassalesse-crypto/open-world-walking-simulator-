@@ -368,6 +368,36 @@ function updateDayNight(dt, playerX, playerZ) {
   moonLight.position.set(playerX - sunAcross * 400, Math.max(-sunUp * 300, 50), playerZ - 200);
 }
 
+// ── Fireflies ───────────────────────────────────────────────────────
+const FIREFLY_COUNT = 30;
+const fireflies = [];
+const fireflyGeo = new THREE.SphereGeometry(0.08, 4, 4);
+for (let i = 0; i < FIREFLY_COUNT; i++) {
+  const mat = new THREE.MeshBasicMaterial({ color: 0xccff66, transparent: true, opacity: 0 });
+  const m = new THREE.Mesh(fireflyGeo, mat);
+  const a = Math.random() * Math.PI * 2, r = 10 + Math.random() * 200;
+  m.position.set(Math.cos(a) * r, 0, Math.sin(a) * r);
+  m.visible = false;
+  scene.add(m);
+  fireflies.push({ mesh: m, mat, dir: new THREE.Vector3(Math.random()-0.5, 0, Math.random()-0.5).normalize(),
+    speed: 0.5 + Math.random() * 1.5, phase: Math.random() * Math.PI * 2 });
+}
+
+function updateFireflies(dt, elapsed) {
+  const isNight = timeOfDay < 0.2 || timeOfDay > 0.8;
+  const nightFade = isNight ? Math.min(1, timeOfDay < 0.2 ? (0.2 - timeOfDay) * 10 : (timeOfDay - 0.8) * 10) : 0;
+  for (const f of fireflies) {
+    f.mesh.visible = nightFade > 0.01;
+    if (!f.mesh.visible) continue;
+    f.mesh.position.x += f.dir.x * f.speed * dt;
+    f.mesh.position.z += f.dir.z * f.speed * dt;
+    const ty = getTerrainHeight(f.mesh.position.x, f.mesh.position.z);
+    f.mesh.position.y = ty + 1 + Math.sin(elapsed * 2 + f.phase) * 2;
+    f.mat.opacity = nightFade * (0.5 + Math.sin(elapsed * 3 + f.phase) * 0.4);
+    if (Math.random() < dt * 0.3) f.dir.set(Math.random()-0.5, 0, Math.random()-0.5).normalize();
+  }
+}
+
 // ── Noise helper ───────────────────────────────────────────────────
 const perlin = new ImprovedNoise();
 
@@ -1066,6 +1096,9 @@ function animate() {
     const totalMin = Math.floor(timeOfDay * 1440);
     hudTime.textContent = `${String(Math.floor(totalMin/60)).padStart(2,'0')}:${String(totalMin%60).padStart(2,'0')}`;
   }
+
+  // Fireflies
+  updateFireflies(dt, clock.elapsedTime);
 
   // Minimap (desktop only)
   minimapCanvas.style.display = inVR ? 'none' : 'block';
