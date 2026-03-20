@@ -49,11 +49,20 @@
   #crosshair {
     position: fixed; top: 50%; left: 50%;
     transform: translate(-50%, -50%);
-    width: 4px; height: 4px;
-    background: rgba(255,255,255,0.4);
-    border-radius: 50%; z-index: 50;
-    pointer-events: none;
+    z-index: 50; pointer-events: none;
   }
+  #crosshair .ch-h, #crosshair .ch-v {
+    position: absolute; background: rgba(255,255,255,0.7);
+  }
+  #crosshair .ch-h { width: 16px; height: 1px; top: 50%; left: 50%; transform: translate(-50%, -50%); }
+  #crosshair .ch-v { width: 1px; height: 16px; top: 50%; left: 50%; transform: translate(-50%, -50%); }
+  #crosshair .ch-dot { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: 4px; height: 4px; display: none; font-size: 8px; line-height: 4px; text-align: center; color: inherit; }
+  #crosshair.npc-near .ch-h, #crosshair.npc-near .ch-v { background: rgba(255,220,50,0.9); }
+  #crosshair.npc-near .ch-dot { display: block; }
+  #crosshair.gem-near .ch-h, #crosshair.gem-near .ch-v { background: rgba(80,255,80,0.9); }
+  #crosshair.gem-near { animation: ch-pulse 0.6s ease-in-out infinite alternate; }
+  @keyframes ch-pulse { from { transform: translate(-50%,-50%) scale(1); } to { transform: translate(-50%,-50%) scale(1.3); } }
 
   #vr-button {
     position: fixed; bottom: 20px; right: 20px; z-index: 200;
@@ -172,7 +181,7 @@
   </div>
 </div>
 
-<div id="crosshair"></div>
+<div id="crosshair"><div class="ch-h"></div><div class="ch-v"></div><div class="ch-dot">&#9670;</div></div>
 <button id="vr-button">Enter VR</button>
 
 <div id="hud">
@@ -1384,6 +1393,22 @@ function animate() {
   for (const cloud of clouds) {
     cloud.position.x += cloud.userData.speed * dt;
     if (cloud.position.x > 1000) cloud.position.x = -1000;
+  }
+
+  // Crosshair state
+  {
+    const ch = document.getElementById('crosshair');
+    ch.style.display = (inVR || gamePaused || dialogOpen) ? 'none' : 'block';
+    ch.classList.remove('npc-near', 'gem-near');
+    if (nearestNPC) ch.classList.add('npc-near');
+    else {
+      const cp = camera.position;
+      for (const g of gems) {
+        if (g.collected) continue;
+        const dx = cp.x - g.mesh.position.x, dz = cp.z - g.mesh.position.z;
+        if (Math.sqrt(dx*dx+dz*dz) < GEM_COLLECT_DIST) { ch.classList.add('gem-near'); break; }
+      }
+    }
   }
 
   // Auto-save every 10 seconds
