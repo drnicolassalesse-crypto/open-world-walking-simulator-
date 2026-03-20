@@ -54,6 +54,18 @@
     border-radius: 50%; z-index: 50;
     pointer-events: none;
   }
+
+  #vr-button {
+    position: fixed; bottom: 20px; right: 20px; z-index: 200;
+    background: rgba(0,0,0,0.6); backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,0.2); border-radius: 10px;
+    color: #fff; font-family: inherit; font-size: 14px;
+    padding: 12px 24px; cursor: pointer; display: none;
+    transition: background 0.2s;
+  }
+  #vr-button:hover { background: rgba(60,60,200,0.6); }
+  #vr-button.not-supported { color: rgba(255,255,255,0.4); cursor: default; }
+  #vr-button.not-supported:hover { background: rgba(0,0,0,0.6); }
 </style>
 </head>
 <body>
@@ -72,6 +84,7 @@
 </div>
 
 <div id="crosshair"></div>
+<button id="vr-button">Enter VR</button>
 
 <div id="hud">
   <span class="label">POS</span> <span id="hud-pos">0, 0, 0</span><br>
@@ -91,6 +104,7 @@
 <script type="module">
 import * as THREE from 'three';
 import { ImprovedNoise } from 'three/addons/math/ImprovedNoise.js';
+import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
 
 // ── Constants ──────────────────────────────────────────────────────
 const TERRAIN_SIZE = 2000;
@@ -111,7 +125,98 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.1;
+renderer.xr.enabled = true;
 document.body.appendChild(renderer.domElement);
+
+// ── WebXR VR Setup ────────────────────────────────────────────────
+let vrSession = null;
+let inVR = false;
+const vrButton = document.getElementById('vr-button');
+
+// Camera rig: parent group we move for VR locomotion
+const cameraRig = new THREE.Group();
+cameraRig.add(new THREE.PerspectiveCamera()); // placeholder, replaced below
+
+// VR controllers
+const controllerModelFactory = new XRControllerModelFactory();
+let controller0, controller1, grip0, grip1;
+let vrTurnCooldown = 0;
+
+function setupVRControllers() {
+  controller0 = renderer.xr.getController(0);
+  controller1 = renderer.xr.getController(1);
+  grip0 = renderer.xr.getControllerGrip(0);
+  grip1 = renderer.xr.getControllerGrip(1);
+  grip0.add(controllerModelFactory.createControllerModel(grip0));
+  grip1.add(controllerModelFactory.createControllerModel(grip1));
+  cameraRig.add(controller0, controller1, grip0, grip1);
+
+  // Visual ray for each controller
+  const lineGeo = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-3)
+  ]);
+  const lineMat = new THREE.LineBasicMaterial({ color: 0x4488ff, transparent: true, opacity: 0.5 });
+  controller0.add(new THREE.Line(lineGeo.clone(), lineMat.clone()));
+  controller1.add(new THREE.Line(lineGeo.clone(), lineMat.clone()));
+}
+
+async function initVR() {
+  if (!navigator.xr) {
+    vrButton.textContent = 'VR Not Supported';
+    vrButton.classList.add('not-supported');
+    vrButton.style.display = 'block';
+    return;
+  }
+  const supported = await navigator.xr.isSessionSupported('immersive-vr').catch(() => false);
+  if (!supported) {
+    vrButton.textContent = 'VR Not Supported';
+    vrButton.classList.add('not-supported');
+    vrButton.style.display = 'block';
+    return;
+  }
+  vrButton.style.display = 'block';
+  vrButton.addEventListener('click', toggleVR);
+}
+
+async function toggleVR() {
+  if (vrButton.classList.contains('not-supported')) return;
+  if (!inVR) {
+    try {
+      vrSession = await navigator.xr.requestSession('immersive-vr', {
+        optionalFeatures: ['local-floor', 'bounded-floor']
+      });
+      renderer.xr.setSession(vrSession);
+      vrSession.addEventListener('end', () => {
+        inVR = false;
+        vrButton.textContent = 'Enter VR';
+        vrSession = null;
+      });
+      inVR = true;
+      vrButton.textContent = 'Exit VR';
+      // Hide DOM HUD in VR
+      document.getElementById('hud').style.display = 'none';
+      document.getElementById('crosshair').style.display = 'none';
+      blocker.style.display = 'none';
+    } catch (e) {
+      console.warn('Failed to start VR session:', e);
+    }
+  } else if (vrSession) {
+    vrSession.end();
+  }
+}
+
+function getVRThumbstickAxes(handedness) {
+  const session = renderer.xr.getSession();
+  if (!session) return [0, 0];
+  for (const source of session.inputSources) {
+    if (source.handedness === handedness && source.gamepad) {
+      const axes = source.gamepad.axes;
+      // axes[2]=X, axes[3]=Y for thumbstick on standard mapping
+      return [axes[2] || 0, axes[3] || 0];
+    }
+  }
+  return [0, 0];
+}
 
 // ── Scene ──────────────────────────────────────────────────────────
 const scene = new THREE.Scene();
@@ -121,6 +226,11 @@ scene.fog = new THREE.FogExp2(0xC8DFF0, 0.0018);
 // ── Camera ─────────────────────────────────────────────────────────
 const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 2000);
 camera.position.set(0, 20, 0);
+
+// Replace placeholder camera in rig with actual camera
+cameraRig.remove(cameraRig.children[0]);
+cameraRig.add(camera);
+setupVRControllers();
 
 // ── Lighting ───────────────────────────────────────────────────────
 const ambientLight = new THREE.HemisphereLight(0x9DC4E8, 0x5A7E3A, 0.7);
@@ -240,6 +350,7 @@ function generateTerrain() {
 
 const terrain = generateTerrain();
 scene.add(terrain);
+scene.add(cameraRig);
 
 // Height sampling via raycaster
 const terrainRaycaster = new THREE.Raycaster();
@@ -520,6 +631,9 @@ document.addEventListener('mousemove', (e) => {
 document.addEventListener('keydown', (e) => { keys[e.code] = true; });
 document.addEventListener('keyup', (e) => { keys[e.code] = false; });
 
+// Initialize VR (async check, button setup)
+initVR();
+
 // ── Animation loop ─────────────────────────────────────────────────
 const clock = new THREE.Clock();
 let prevTerrainY = getTerrainHeight(0, 0);
@@ -531,11 +645,49 @@ function getCardinal(yaw) {
 }
 
 function animate() {
-  requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), 0.1);
 
-  if (isLocked) {
-    // Movement
+  if (inVR) {
+    // ── VR locomotion ──
+    // Left thumbstick: walk/strafe relative to head direction
+    const [lx, lz] = getVRThumbstickAxes('left');
+    if (Math.abs(lx) > 0.1 || Math.abs(lz) > 0.1) {
+      // Get head forward direction projected onto XZ plane
+      const headQuat = new THREE.Quaternion();
+      const xrCamera = renderer.xr.getCamera();
+      xrCamera.getWorldQuaternion(headQuat);
+      const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(headQuat);
+      forward.y = 0; forward.normalize();
+      const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0,1,0)).normalize();
+
+      const moveVec = new THREE.Vector3();
+      moveVec.addScaledVector(right, lx * WALK_SPEED * dt);
+      moveVec.addScaledVector(forward, -lz * WALK_SPEED * dt);
+      cameraRig.position.add(moveVec);
+    }
+
+    // Right thumbstick: snap turn (X axis)
+    const [rx] = getVRThumbstickAxes('right');
+    vrTurnCooldown = Math.max(0, vrTurnCooldown - dt);
+    if (Math.abs(rx) > 0.6 && vrTurnCooldown <= 0) {
+      cameraRig.rotation.y -= Math.sign(rx) * Math.PI / 6; // 30-degree snap
+      vrTurnCooldown = 0.3;
+    }
+
+    // Clamp rig to terrain bounds
+    const halfVR = TERRAIN_SIZE * 0.49;
+    cameraRig.position.x = THREE.MathUtils.clamp(cameraRig.position.x, -halfVR, halfVR);
+    cameraRig.position.z = THREE.MathUtils.clamp(cameraRig.position.z, -halfVR, halfVR);
+
+    // Ground following for VR rig
+    const vrTerrainY = getTerrainHeight(cameraRig.position.x, cameraRig.position.z);
+    cameraRig.position.y = THREE.MathUtils.lerp(cameraRig.position.y, vrTerrainY, 1 - Math.pow(0.001, dt));
+
+    // Move shadow camera with VR player
+    sunLight.position.set(cameraRig.position.x + 300, 400, cameraRig.position.z + 200);
+    sunLight.target.position.set(cameraRig.position.x, cameraRig.position.y, cameraRig.position.z);
+  } else if (isLocked) {
+    // ── Desktop locomotion ──
     const speed = keys['ShiftLeft'] || keys['ShiftRight'] ? RUN_SPEED : WALK_SPEED;
 
     direction.set(0, 0, 0);
@@ -546,7 +698,6 @@ function animate() {
 
     if (direction.length() > 0) {
       direction.normalize();
-      // Rotate direction by yaw
       const sin = Math.sin(yaw);
       const cos = Math.cos(yaw);
       const dx = direction.x * cos - direction.z * sin;
@@ -561,30 +712,21 @@ function animate() {
     camera.position.x += velocity.x * dt;
     camera.position.z += velocity.z * dt;
 
-    // Clamp to terrain bounds
     const halfSize = TERRAIN_SIZE * 0.49;
     camera.position.x = THREE.MathUtils.clamp(camera.position.x, -halfSize, halfSize);
     camera.position.z = THREE.MathUtils.clamp(camera.position.z, -halfSize, halfSize);
 
-    // Ground following with smooth interpolation
     const terrainY = getTerrainHeight(camera.position.x, camera.position.z);
     const targetY = terrainY + PLAYER_HEIGHT;
     prevTerrainY = THREE.MathUtils.lerp(prevTerrainY, targetY, 1 - Math.pow(0.001, dt));
     camera.position.y = prevTerrainY;
 
-    // Apply camera rotation
     euler.set(pitch, yaw, 0);
     camera.quaternion.setFromEuler(euler);
 
-    // Move shadow camera with player
-    sunLight.position.set(
-      camera.position.x + 300,
-      400,
-      camera.position.z + 200
-    );
+    sunLight.position.set(camera.position.x + 300, 400, camera.position.z + 200);
     sunLight.target.position.set(camera.position.x, camera.position.y, camera.position.z);
 
-    // HUD
     hudPos.textContent = `${camera.position.x.toFixed(0)}, ${camera.position.z.toFixed(0)}`;
     hudDir.textContent = getCardinal(yaw);
     hudAlt.textContent = (camera.position.y - PLAYER_HEIGHT).toFixed(1);
@@ -612,7 +754,7 @@ const startY = getTerrainHeight(0, 0) + PLAYER_HEIGHT;
 camera.position.set(0, startY, 0);
 prevTerrainY = startY;
 
-animate();
+renderer.setAnimationLoop(animate);
 </script>
 </body>
 </html>
