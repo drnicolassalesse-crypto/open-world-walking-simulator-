@@ -2023,7 +2023,7 @@ initVR();
 // ── Ambient Soundtrack ──────────────────────────────────────────
 let audioCtx = null, audioMuted = false, audioStarted = false;
 let dayOsc, nightOsc, forestOsc, dayGain, nightGain, forestGain, masterGain;
-let cricketGains = [], windGain;
+let cricketGains = [], windGain, birdGain, birdOsc, winterWindGain, winterWindBpf;
 
 function initAudio() {
   if (audioStarted) return;
@@ -2058,6 +2058,22 @@ function initAudio() {
   const bpf = audioCtx.createBiquadFilter(); bpf.type = 'bandpass'; bpf.frequency.value = 400; bpf.Q.value = 0.5;
   windGain = audioCtx.createGain(); windGain.gain.value = 0.008;
   windSrc.connect(bpf); bpf.connect(windGain); windGain.connect(masterGain); windSrc.start();
+  // Bird chirps: short high-freq tone bursts with stereo pan
+  birdOsc = audioCtx.createOscillator(); birdOsc.type = 'sine'; birdOsc.frequency.value = 2200;
+  birdGain = audioCtx.createGain(); birdGain.gain.value = 0;
+  const birdPan = audioCtx.createStereoPanner(); birdPan.pan.value = 0.6;
+  const birdLfo = audioCtx.createOscillator(); birdLfo.type = 'square'; birdLfo.frequency.value = 4;
+  const birdLfoG = audioCtx.createGain(); birdLfoG.gain.value = 0.015;
+  birdLfo.connect(birdLfoG); birdLfoG.connect(birdGain.gain);
+  birdOsc.connect(birdGain); birdGain.connect(birdPan); birdPan.connect(masterGain); birdOsc.start(); birdLfo.start();
+  // Winter wind howl: filtered noise, louder
+  const wwBuf = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
+  const wwD = wwBuf.getChannelData(0); for (let i = 0; i < bufSize; i++) wwD[i] = Math.random()*2-1;
+  const wwSrc = audioCtx.createBufferSource(); wwSrc.buffer = wwBuf; wwSrc.loop = true;
+  winterWindBpf = audioCtx.createBiquadFilter(); winterWindBpf.type = 'bandpass'; winterWindBpf.frequency.value = 250; winterWindBpf.Q.value = 1.5;
+  winterWindGain = audioCtx.createGain(); winterWindGain.gain.value = 0;
+  const wwPan = audioCtx.createStereoPanner(); wwPan.pan.value = -0.4;
+  wwSrc.connect(winterWindBpf); winterWindBpf.connect(winterWindGain); winterWindGain.connect(wwPan); wwPan.connect(masterGain); wwSrc.start();
   // Waterfall: white noise through 200Hz bandpass
   const wfBuf = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
   const wfD = wfBuf.getChannelData(0); for (let i = 0; i < bufSize; i++) wfD[i] = Math.random()*2-1;
@@ -2078,9 +2094,22 @@ function updateAudio(dt) {
   // Forest zone: x in [-60,-10], z in [-60,10]
   const inForest = pp.x > -60 && pp.x < -10 && pp.z > -60 && pp.z < 10;
   forestGain.gain.value += ((inForest ? 0.015 : 0) - forestGain.gain.value) * 2 * dt;
-  // Crickets: fade in at night (timeOfDay > 0.75 or < 0.25)
+  // Crickets: fade in at night, louder in summer
   const nightActive = (timeOfDay > 0.75 || timeOfDay < 0.25) ? 1 : 0;
-  for (const cg of cricketGains) cg.gain.value += (nightActive * 0.01 - cg.gain.value) * 2 * dt;
+  const cricketVol = nightActive * (currentSeason === 'winter' ? 0.002 : 0.01);
+  for (const cg of cricketGains) cg.gain.value += (cricketVol - cg.gain.value) * 2 * dt;
+  // Birds: dawn (0.2-0.35) and dusk (0.7-0.8)
+  if (birdGain) {
+    const dawn = Math.max(0, 1 - Math.abs(timeOfDay - 0.27) / 0.08);
+    const dusk = Math.max(0, 1 - Math.abs(timeOfDay - 0.75) / 0.05);
+    const birdVol = Math.max(dawn, dusk) * (currentSeason === 'winter' ? 0.003 : 0.012);
+    birdGain.gain.value += (birdVol - birdGain.gain.value) * 2 * dt;
+  }
+  // Winter wind howl
+  if (winterWindGain) {
+    const wwVol = currentSeason === 'winter' ? 0.03 * windStrength : 0;
+    winterWindGain.gain.value += (wwVol - winterWindGain.gain.value) * 2 * dt;
+  }
 }
 
 function toggleMute() {
