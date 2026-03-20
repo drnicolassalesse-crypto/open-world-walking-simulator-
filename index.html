@@ -303,6 +303,8 @@ cameraRig.add(new THREE.PerspectiveCamera()); // placeholder, replaced below
 const controllerModelFactory = new XRControllerModelFactory();
 let controller0, controller1, grip0, grip1;
 let vrTurnCooldown = 0;
+let vrSmoothMove = false; // false=teleport-style snap, true=smooth locomotion
+let vrSettingsVisible = false;
 
 function setupVRControllers() {
   controller0 = renderer.xr.getController(0);
@@ -320,6 +322,41 @@ function setupVRControllers() {
   const lineMat = new THREE.LineBasicMaterial({ color: 0x4488ff, transparent: true, opacity: 0.5 });
   controller0.add(new THREE.Line(lineGeo.clone(), lineMat.clone()));
   controller1.add(new THREE.Line(lineGeo.clone(), lineMat.clone()));
+}
+
+// VR Settings panel (3D floating)
+const vrSettingsGroup = new THREE.Group();
+vrSettingsGroup.visible = false;
+{
+  const bgMat = new THREE.MeshBasicMaterial({ color: 0x222233, transparent: true, opacity: 0.85, side: THREE.DoubleSide });
+  const bg = new THREE.Mesh(new THREE.PlaneGeometry(0.6, 0.3), bgMat);
+  vrSettingsGroup.add(bg);
+  // Gear icon (small box as indicator)
+  const gear = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.01),
+    new THREE.MeshBasicMaterial({ color: 0xffffff }));
+  gear.position.set(-0.22, 0.1, 0.01); vrSettingsGroup.add(gear);
+  // Label canvas
+  const lc = document.createElement('canvas'); lc.width = 256; lc.height = 128;
+  const lx = lc.getContext('2d'); lx.fillStyle = '#fff'; lx.font = '20px sans-serif';
+  lx.fillText('VR Locomotion', 20, 30); lx.font = '16px sans-serif';
+  lx.fillText('Mode: Snap Turn', 20, 70);
+  const labelTex = new THREE.CanvasTexture(lc);
+  const labelMesh = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.25),
+    new THREE.MeshBasicMaterial({ map: labelTex, transparent: true, side: THREE.DoubleSide }));
+  labelMesh.position.z = 0.01; vrSettingsGroup.add(labelMesh);
+  vrSettingsGroup.userData = { canvas: lc, ctx: lx, tex: labelTex, label: labelMesh };
+}
+cameraRig.add(vrSettingsGroup);
+
+function updateVRSettingsLabel() {
+  const { ctx: lx, canvas: lc, tex } = vrSettingsGroup.userData;
+  lx.clearRect(0, 0, 256, 128);
+  lx.fillStyle = '#fff'; lx.font = '20px sans-serif';
+  lx.fillText('VR Locomotion', 20, 30); lx.font = '16px sans-serif';
+  lx.fillText(`Mode: ${vrSmoothMove ? 'Smooth Move' : 'Snap Turn'}`, 20, 70);
+  lx.fillStyle = '#aaa'; lx.font = '13px sans-serif';
+  lx.fillText('Press Y to toggle', 20, 100);
+  tex.needsUpdate = true;
 }
 
 async function initVR() {
@@ -1710,11 +1747,13 @@ function animate() {
       cameraRig.position.add(moveVec);
     }
 
-    // Right thumbstick: snap turn (X axis)
+    // Right thumbstick: turn
     const [rx] = getVRThumbstickAxes('right');
     vrTurnCooldown = Math.max(0, vrTurnCooldown - dt);
-    if (Math.abs(rx) > 0.6 && vrTurnCooldown <= 0) {
-      cameraRig.rotation.y -= Math.sign(rx) * Math.PI / 6; // 30-degree snap
+    if (vrSmoothMove) {
+      if (Math.abs(rx) > 0.15) cameraRig.rotation.y -= rx * 1.5 * dt;
+    } else if (Math.abs(rx) > 0.6 && vrTurnCooldown <= 0) {
+      cameraRig.rotation.y -= Math.sign(rx) * Math.PI / 4; // 45-degree snap
       vrTurnCooldown = 0.3;
     }
 
@@ -1729,13 +1768,23 @@ function animate() {
     cameraRig.position.y += velocityY * dt;
     if (cameraRig.position.y <= vrTerrainY) { cameraRig.position.y = vrTerrainY; velocityY = 0; onGround = true; }
 
-    // VR A-button (button 4) on right controller to interact with NPC
+    // VR buttons
     const session = renderer.xr.getSession();
     if (session) {
       for (const source of session.inputSources) {
-        if (source.handedness === 'right' && source.gamepad && source.gamepad.buttons[4]) {
-          if (source.gamepad.buttons[4].pressed && nearestNPC && !dialogOpen) openNPCDialog(nearestNPC);
-          if (source.gamepad.buttons[5] && source.gamepad.buttons[5].pressed && onGround) { velocityY = 8; onGround = false; }
+        if (source.handedness === 'right' && source.gamepad) {
+          const btns = source.gamepad.buttons;
+          if (btns[4] && btns[4].pressed && nearestNPC && !dialogOpen) openNPCDialog(nearestNPC);
+          if (btns[5] && btns[5].pressed && onGround) { velocityY = 8; onGround = false; }
+          // Y button (index 5 on left) or B button (index 5 on right) toggles VR settings
+        }
+        if (source.handedness === 'left' && source.gamepad && source.gamepad.buttons[5]) {
+          if (source.gamepad.buttons[5].pressed && vrTurnCooldown <= 0) {
+            vrSmoothMove = !vrSmoothMove; updateVRSettingsLabel();
+            vrSettingsGroup.visible = true; vrSettingsGroup.position.set(0, 1.4, -0.8);
+            setTimeout(() => { vrSettingsGroup.visible = false; }, 3000);
+            vrTurnCooldown = 0.5;
+          }
         }
       }
     }
