@@ -221,6 +221,10 @@
   .hof-rank { color: #FFD700; width: 24px; }
   .hof-score { font-weight: bold; }
   .hof-date { color: rgba(255,255,255,0.4); font-size: 11px; }
+  #achieve-panel { position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:350;display:none;background:rgba(0,0,0,0.75);backdrop-filter:blur(10px);border:1px solid rgba(255,215,0,0.3);border-radius:14px;padding:24px 28px;color:#fff;min-width:300px; }
+  #achieve-panel h3 { font-size:16px;font-weight:300;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:12px;text-align:center;color:#FFD700; }
+  .ach-row{margin-bottom:8px;} .ach-name{font-size:12px;font-weight:bold;} .ach-desc{font-size:10px;color:rgba(255,255,255,0.5);} .ach-bar{height:4px;background:rgba(255,255,255,0.1);border-radius:2px;margin-top:2px;overflow:hidden;} .ach-bar-fill{height:100%;border-radius:2px;} .ach-status{float:right;font-size:10px;}
+  #achieve-banner{position:fixed;top:-50px;left:50%;transform:translateX(-50%);z-index:500;color:#FFD700;font-size:15px;font-weight:bold;background:rgba(0,0,0,0.7);backdrop-filter:blur(6px);border:1px solid rgba(255,215,0,0.4);border-radius:10px;padding:10px 24px;transition:top 0.5s ease;pointer-events:none;}
   #sign-tooltip {
     position: fixed; top: 25%; left: 50%; transform: translateX(-50%);
     z-index: 50; color: #fff; font-size: 14px;
@@ -292,6 +296,8 @@
 <div id="fish-status"></div>
 <div id="hall-of-fame"><h3>Hall of Fame</h3><div id="hof-list"></div></div>
 <div id="sign-tooltip"></div>
+<div id="achieve-panel"><h3>Achievements</h3><div id="ach-list"></div></div>
+<div id="achieve-banner"></div>
 <div id="quest-log"><h3>Quest Log</h3><div id="quest-list"></div></div>
 
 <script type="importmap">
@@ -1822,6 +1828,7 @@ function openNPCDialog(npc) {
   dialogOpen = true; dialogNPC = npc; dialogShowingChoice = false;
   dialogChoices.style.display = 'none';
   dialogName.textContent = npc.def.name;
+  npcsSpokenTo.add(npc.def.name);
   if (npc.questState === 'idle') {
     dialogMsg.textContent = `Can you collect ${npc.questGemsNeeded} gems for me?`;
     npc.questState = 'quest_given';
@@ -1981,7 +1988,9 @@ document.addEventListener('keydown', (e) => {
   if (e.code === 'KeyI') { toggleInventory(); return; }
   if (e.code === 'KeyQ') { toggleQuestLog(); return; }
   if (e.code === 'KeyM') { toggleMute(); return; }
+  if (e.code === 'KeyA' && (gamePaused || !isLocked || achOpen)) { toggleAchievements(); return; }
   if (e.code === 'KeyH') { toggleHOF(); return; }
+  if (e.code === 'Escape' && achOpen) { toggleAchievements(); return; }
   if (e.code === 'Escape' && hofOpen) { toggleHOF(); return; }
   if (e.code === 'Escape' && questLogOpen) { toggleQuestLog(); return; }
   if (e.code === 'Escape' && inventoryOpen) { toggleInventory(); return; }
@@ -2109,6 +2118,36 @@ function toggleHOF() {
   else if (!inVR && !gamePaused) renderer.domElement.requestPointerLock();
 }
 updateScoreHUD();
+
+// ── Achievements ────────────────────────────────────────────────
+let achOpen=false, totalDist=0, nightCount=0, wasNight=false, npcsSpokenTo=new Set();
+const achPanel=document.getElementById('achieve-panel'), achBanner=document.getElementById('achieve-banner');
+let achState=JSON.parse(localStorage.getItem('wandererAchievements')||'{}');
+if(!achState.unlocked) achState={unlocked:{},dist:0,nights:0,spoken:[]};
+totalDist=achState.dist||0; nightCount=achState.nights||0; npcsSpokenTo=new Set(achState.spoken||[]);
+const ACHIEVEMENTS=[
+  {id:'explorer',name:'Explorer',desc:'Move 500 units',max:500,get cur(){return Math.min(totalDist,500);},check(){return totalDist>=500;}},
+  {id:'gemcollector',name:'Gem Collector',desc:'Collect 10 gems',max:10,get cur(){return Math.min(gemsCollected,10);},check(){return gemsCollected>=10;}},
+  {id:'treasure',name:'Treasure Hunter',desc:'Open the chest',max:1,get cur(){return chestOpened?1:0;},check(){return chestOpened;}},
+  {id:'nightowl',name:'Night Owl',desc:'Spend 3 nights',max:3,get cur(){return Math.min(nightCount,3);},check(){return nightCount>=3;}},
+  {id:'social',name:'Social Butterfly',desc:'Talk to all 4 NPCs',max:4,get cur(){return Math.min(npcsSpokenTo.size,4);},check(){return npcsSpokenTo.size>=4;}},
+];
+function showAchBanner(name) { achBanner.textContent=`Achievement Unlocked: ${name}`; achBanner.style.top='20px'; setTimeout(()=>{achBanner.style.top='-50px';},3000); }
+function checkAchievements() {
+  for(const a of ACHIEVEMENTS) { if(!achState.unlocked[a.id]&&a.check()){achState.unlocked[a.id]=true;showAchBanner(a.name);} }
+  achState.dist=totalDist;achState.nights=nightCount;achState.spoken=[...npcsSpokenTo];
+  localStorage.setItem('wandererAchievements',JSON.stringify(achState));
+}
+function renderAchievements() {
+  const el=document.getElementById('ach-list'); el.innerHTML='';
+  for(const a of ACHIEVEMENTS){const done=!!achState.unlocked[a.id],pct=Math.min(100,(a.cur/a.max)*100);
+    el.innerHTML+=`<div class="ach-row"><span class="ach-name">${done?'🏆 ':'🔒 '}${a.name}</span><span class="ach-status" style="color:${done?'#FFD700':'#888'}">${done?'Unlocked':'Locked'}</span><div class="ach-desc">${a.desc} (${a.cur}/${a.max})</div><div class="ach-bar"><div class="ach-bar-fill" style="width:${pct}%;background:${done?'#FFD700':'#4CAF50'}"></div></div></div>`;}
+}
+function toggleAchievements() {
+  achOpen=!achOpen; achPanel.style.display=achOpen?'block':'none';
+  if(achOpen){renderAchievements();if(!inVR)document.exitPointerLock();}
+  else if(!inVR)renderer.domElement.requestPointerLock();
+}
 
 // ── Animation loop ─────────────────────────────────────────────────
 const clock = new THREE.Clock();
@@ -2314,6 +2353,9 @@ function animate() {
     }
   }
 
+  // Achievements
+  totalDist+=Math.sqrt(velocity.x*velocity.x+velocity.z*velocity.z)*dt;
+  {const isN=timeOfDay>0.85||timeOfDay<0.25;if(isN&&!wasNight)nightCount++;wasNight=isN;} checkAchievements();
   // Survival score & auto-save
   survivalTimer += dt;
   saveTimer += dt;
