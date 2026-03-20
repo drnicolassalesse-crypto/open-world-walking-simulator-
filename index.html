@@ -130,6 +130,24 @@
     background: #fff; opacity: 0; transition: opacity 0.1s;
   }
 
+  #pause-menu {
+    position: fixed; inset: 0; z-index: 400;
+    background: rgba(0,0,0,0.7); backdrop-filter: blur(8px);
+    display: none; align-items: center; justify-content: center;
+  }
+  #pause-menu .pause-card {
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 16px; padding: 36px 44px; text-align: center; color: #fff; max-width: 360px;
+  }
+  #pause-menu h2 { font-size: 24px; font-weight: 300; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 20px; }
+  #pause-menu .pause-btn {
+    display: block; width: 100%; margin: 8px 0; padding: 10px; cursor: pointer;
+    background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 8px; color: #fff; font-family: inherit; font-size: 14px; transition: background 0.2s;
+  }
+  #pause-menu .pause-btn:hover { background: rgba(255,255,255,0.2); }
+  #pause-controls { font-size: 12px; color: rgba(255,255,255,0.5); line-height: 1.8; margin-top: 12px; display: none; }
+
   #interact-hint {
     position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
     z-index: 50; color: rgba(255,255,255,0.8); font-size: 13px;
@@ -172,6 +190,15 @@
     <div class="npc-name" id="dialog-name"></div>
     <div class="npc-msg" id="dialog-msg"></div>
     <button id="dialog-close">Close</button>
+  </div>
+</div>
+<div id="pause-menu">
+  <div class="pause-card">
+    <h2>Wanderer</h2>
+    <button class="pause-btn" id="pause-resume">Resume</button>
+    <button class="pause-btn" id="pause-controls-btn">Controls</button>
+    <button class="pause-btn" id="pause-reset">Reset Save</button>
+    <div id="pause-controls">WASD=move, Shift=sprint, Space=jump<br>E=talk, Tab=settings, Mouse=look<br>Esc=pause</div>
   </div>
 </div>
 <div id="rain-overlay"></div>
@@ -310,6 +337,8 @@ function getVRThumbstickAxes(handedness) {
 // ── Stamina ─────────────────────────────────────────────────────────
 let stamina = 100, sprintLocked = false;
 let velocityY = 0, onGround = true;
+let gamePaused = false;
+const pauseMenu = document.getElementById('pause-menu');
 const staminaFill = document.getElementById('stamina-fill');
 function getVRGripPressed() {
   const session = renderer.xr.getSession();
@@ -1101,13 +1130,32 @@ document.addEventListener('pointerlockchange', () => {
 });
 
 document.addEventListener('mousemove', (e) => {
-  if (!isLocked) return;
+  if (!isLocked || gamePaused) return;
   yaw -= e.movementX * MOUSE_SENSITIVITY;
   pitch -= e.movementY * MOUSE_SENSITIVITY;
   pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, pitch));
 });
 
+function togglePause() {
+  gamePaused = !gamePaused;
+  pauseMenu.style.display = gamePaused ? 'flex' : 'none';
+  if (gamePaused) { document.exitPointerLock(); }
+  else { renderer.domElement.requestPointerLock(); }
+}
+document.getElementById('pause-resume').addEventListener('click', togglePause);
+document.getElementById('pause-controls-btn').addEventListener('click', () => {
+  const el = document.getElementById('pause-controls');
+  el.style.display = el.style.display === 'block' ? 'none' : 'block';
+});
+document.getElementById('pause-reset').addEventListener('click', () => {
+  localStorage.removeItem('wanderer_save');
+  saveToast.style.opacity = '1'; saveToast.textContent = 'Save cleared';
+  setTimeout(() => { saveToast.style.opacity = '0'; saveToast.textContent = 'Game saved'; }, 2000);
+});
+
 document.addEventListener('keydown', (e) => {
+  if (e.code === 'Escape' && !dialogOpen) { e.preventDefault(); togglePause(); return; }
+  if (gamePaused) return;
   keys[e.code] = true;
   if (e.code === 'KeyE' && nearestNPC && !dialogOpen) openNPCDialog(nearestNPC);
   if (e.code === 'Space' && onGround) { velocityY = 8; onGround = false; }
@@ -1129,6 +1177,8 @@ function getCardinal(yaw) {
 
 function animate() {
   const dt = Math.min(clock.getDelta(), 0.1);
+
+  if (gamePaused) { renderer.render(scene, camera); return; }
 
   if (inVR) {
     // ── VR locomotion ──
