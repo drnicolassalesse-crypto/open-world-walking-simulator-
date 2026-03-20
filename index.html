@@ -221,6 +221,13 @@
   .hof-rank { color: #FFD700; width: 24px; }
   .hof-score { font-weight: bold; }
   .hof-date { color: rgba(255,255,255,0.4); font-size: 11px; }
+  #sign-tooltip {
+    position: fixed; top: 25%; left: 50%; transform: translateX(-50%);
+    z-index: 50; color: #fff; font-size: 14px;
+    background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);
+    border: 1px solid rgba(255,255,255,0.15); border-radius: 8px;
+    padding: 6px 16px; pointer-events: none; display: none;
+  }
 </style>
 </head>
 <body>
@@ -284,6 +291,7 @@
 <div id="inventory-panel"><h3>Inventory</h3><div id="inv-grid"></div></div>
 <div id="fish-status"></div>
 <div id="hall-of-fame"><h3>Hall of Fame</h3><div id="hof-list"></div></div>
+<div id="sign-tooltip"></div>
 <div id="quest-log"><h3>Quest Log</h3><div id="quest-list"></div></div>
 
 <script type="importmap">
@@ -1293,6 +1301,120 @@ function updateBirds(elapsed) {
   sign.position.set(2.5, by + 2.3, -50); sign.castShadow = true; scene.add(sign);
 }
 
+// ── Waterfalls ──────────────────────────────────────────────────
+const waterfalls = [];
+let waterfallGain;
+{
+  const wfPositions = [{ x:-55, top:8, z:-20 }, { x:45, top:6, z:35 }];
+  const dropGeo = new THREE.SphereGeometry(0.08, 4, 3);
+  const dropMat = new THREE.MeshBasicMaterial({ color: 0xccddff, transparent: true, opacity: 0.7 });
+  const mistGeo = new THREE.SphereGeometry(0.4, 6, 4);
+  const mistMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.3 });
+  for (const wf of wfPositions) {
+    const by = getTerrainHeight(wf.x, wf.z);
+    const drops = [];
+    for (let i = 0; i < 30; i++) {
+      const m = new THREE.Mesh(dropGeo, dropMat);
+      m.position.set(wf.x + (Math.random()-0.5)*1.5, by + Math.random()*wf.top, wf.z + (Math.random()-0.5)*1.5);
+      scene.add(m); drops.push({ mesh: m, vy: 3 + Math.random()*2 });
+    }
+    const mists = [];
+    for (let i = 0; i < 5; i++) {
+      const m = new THREE.Mesh(mistGeo, mistMat.clone());
+      m.position.set(wf.x + (Math.random()-0.5)*2, by + 0.5, wf.z + (Math.random()-0.5)*2);
+      scene.add(m); mists.push(m);
+    }
+    waterfalls.push({ x: wf.x, z: wf.z, baseY: by, top: wf.top, drops, mists });
+  }
+}
+
+function updateWaterfalls(dt, elapsed) {
+  for (const wf of waterfalls) {
+    for (const d of wf.drops) {
+      d.mesh.position.y -= d.vy * dt;
+      if (d.mesh.position.y < wf.baseY) d.mesh.position.y = wf.baseY + wf.top + Math.random();
+    }
+    for (let i = 0; i < wf.mists.length; i++) {
+      wf.mists[i].position.y = wf.baseY + 0.3 + Math.sin(elapsed * 2 + i) * 0.3;
+    }
+  }
+  // Waterfall sound distance
+  if (audioStarted && waterfallGain) {
+    const pp = inVR ? cameraRig.position : camera.position;
+    let minD = Infinity;
+    for (const wf of waterfalls) {
+      const dx = pp.x - wf.x, dz = pp.z - wf.z;
+      minD = Math.min(minD, Math.sqrt(dx*dx+dz*dz));
+    }
+    const vol = minD < 15 ? 0.012 * (1 - minD/15) : 0;
+    waterfallGain.gain.value += (vol - waterfallGain.gain.value) * 3 * dt;
+  }
+}
+
+// ── Mushroom Circle ─────────────────────────────────────────────
+let mushroomTriggered = false;
+const MUSH_CENTER = new THREE.Vector3(-20, 0, 30);
+const mushGlow = new THREE.PointLight(0xffffff, 0, 10);
+let mushGlowTimer = 0;
+{
+  MUSH_CENTER.y = getTerrainHeight(-20, 30);
+  mushGlow.position.set(-20, MUSH_CENTER.y + 2, 30); scene.add(mushGlow);
+  const stemGeo = new THREE.CylinderGeometry(0.15, 0.15, 0.8, 6);
+  const stemMat = new THREE.MeshStandardMaterial({ color: 0xeeeeee, roughness: 0.7 });
+  const colors = [0xcc2222, 0x8833aa, 0xcc2222, 0x8833aa, 0xcc2222, 0x8833aa, 0xcc2222, 0x8833aa];
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2, mx = -20 + Math.cos(a) * 5, mz = 30 + Math.sin(a) * 5;
+    const my = getTerrainHeight(mx, mz);
+    const stem = new THREE.Mesh(stemGeo, stemMat); stem.position.set(mx, my + 0.4, mz); stem.castShadow = true; scene.add(stem);
+    const capGeo = new THREE.CylinderGeometry(0.05, 0.5, 0.4, 8);
+    const cap = new THREE.Mesh(capGeo, new THREE.MeshStandardMaterial({ color: colors[i], roughness: 0.6 }));
+    cap.position.set(mx, my + 1, mz); cap.castShadow = true; scene.add(cap);
+  }
+}
+function updateMushrooms(dt) {
+  if (mushGlowTimer > 0) { mushGlowTimer -= dt; mushGlow.intensity = mushGlowTimer > 0 ? 3 * (mushGlowTimer / 2) : 0; }
+  if (mushroomTriggered) return;
+  const pp = inVR ? cameraRig.position : camera.position;
+  const dx = pp.x - MUSH_CENTER.x, dz = pp.z - MUSH_CENTER.z;
+  if (Math.sqrt(dx*dx+dz*dz) < 5) {
+    mushroomTriggered = true; coinScore += 20; mushGlowTimer = 2;
+    document.getElementById('coin-score').textContent = `Coins: ${coinScore}`;
+    const t = document.getElementById('save-toast');
+    t.textContent = 'The fairy ring pulses with ancient magic... +20 score';
+    t.style.opacity = '1'; setTimeout(() => { t.style.opacity = '0'; t.textContent = 'Game saved'; }, 3000);
+  }
+}
+
+// ── Interactive Signs ────────────────────────────────────────────
+const signs = [];
+const signTooltip = document.getElementById('sign-tooltip');
+{
+  const poleGeo = new THREE.BoxGeometry(0.15, 2, 0.15);
+  const poleMat = new THREE.MeshStandardMaterial({ color: 0x6B4226, roughness: 0.9 });
+  const boardGeo = new THREE.BoxGeometry(1.2, 0.6, 0.1);
+  const boardMat = new THREE.MeshStandardMaterial({ color: 0xC4A35A, roughness: 0.8 });
+  const signDefs = [
+    { x:0, z:-55, text:'Stone Bridge →' }, { x:25, z:45, text:'Ancient Ruins →' },
+    { x:0, z:60, text:'Floating Island ↑' }, { x:8, z:8, text:'Village →' },
+  ];
+  for (const sd of signDefs) {
+    const sy = getTerrainHeight(sd.x, sd.z);
+    const pole = new THREE.Mesh(poleGeo, poleMat); pole.position.set(sd.x, sy+1, sd.z); pole.castShadow = true; scene.add(pole);
+    const board = new THREE.Mesh(boardGeo, boardMat); board.position.set(sd.x, sy+2, sd.z); board.rotation.y = Math.random()*0.3-0.15; board.castShadow = true; scene.add(board);
+    signs.push({ x: sd.x, z: sd.z, text: sd.text });
+  }
+}
+function updateSigns() {
+  const pp = inVR ? cameraRig.position : camera.position;
+  let nearest = null, nearD = 3;
+  for (const s of signs) {
+    const dx = pp.x - s.x, dz = pp.z - s.z, d = Math.sqrt(dx*dx+dz*dz);
+    if (d < nearD) { nearD = d; nearest = s; }
+  }
+  signTooltip.style.display = nearest ? 'block' : 'none';
+  if (nearest) signTooltip.textContent = nearest.text;
+}
+
 // ── Torches ─────────────────────────────────────────────────────
 const torches = [];
 {
@@ -1855,6 +1977,13 @@ function initAudio() {
   const bpf = audioCtx.createBiquadFilter(); bpf.type = 'bandpass'; bpf.frequency.value = 400; bpf.Q.value = 0.5;
   windGain = audioCtx.createGain(); windGain.gain.value = 0.008;
   windSrc.connect(bpf); bpf.connect(windGain); windGain.connect(masterGain); windSrc.start();
+  // Waterfall: white noise through 200Hz bandpass
+  const wfBuf = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
+  const wfD = wfBuf.getChannelData(0); for (let i = 0; i < bufSize; i++) wfD[i] = Math.random()*2-1;
+  const wfSrc = audioCtx.createBufferSource(); wfSrc.buffer = wfBuf; wfSrc.loop = true;
+  const wfBpf = audioCtx.createBiquadFilter(); wfBpf.type = 'bandpass'; wfBpf.frequency.value = 200; wfBpf.Q.value = 0.8;
+  waterfallGain = audioCtx.createGain(); waterfallGain.gain.value = 0;
+  wfSrc.connect(wfBpf); wfBpf.connect(waterfallGain); waterfallGain.connect(masterGain); wfSrc.start();
 }
 
 function updateAudio(dt) {
@@ -2087,6 +2216,9 @@ function animate() {
   updateTorches();
   updateParticles(dt);
   updateAudio(dt);
+  updateWaterfalls(dt, clock.elapsedTime);
+  updateMushrooms(dt);
+  updateSigns();
 
   // Animate water UV
   waterGeo.attributes.uv.array[0] += dt * 0.02; waterGeo.attributes.uv.array[2] += dt * 0.02;
