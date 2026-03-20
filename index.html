@@ -345,6 +345,7 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.1;
 renderer.xr.enabled = true;
 document.body.appendChild(renderer.domElement);
+renderer.domElement.style.transition = 'filter 2s ease';
 
 // ── WebXR VR Setup ────────────────────────────────────────────────
 let vrSession = null;
@@ -2782,6 +2783,19 @@ function animate() {
   // Achievements
   totalDist+=Math.sqrt(velocity.x*velocity.x+velocity.z*velocity.z)*dt;
   {const isN=timeOfDay>0.85||timeOfDay<0.25;if(isN){nightMinutes+=dt/60;}if(isN&&!wasNight)nightCount++;wasNight=isN;} checkAchievements();
+  // Post-processing CSS filters (skip in VR)
+  if (!inVR) {
+    const t = timeOfDay, df = THREE.MathUtils.clamp(Math.sin((t - 0.25) * Math.PI * 2) * 3, 0, 1);
+    const distSR = Math.abs(t - 0.25), distSS = Math.abs(t - 0.75);
+    const sf = Math.max(1 - distSR / 0.06, 1 - distSS / 0.06, 0);
+    let f = '';
+    if (sf > 0.3) f = 'sepia(0.15) hue-rotate(-10deg)';
+    else if (weather === 'rain') f = 'saturate(0.85) brightness(0.95)';
+    else if (currentSeason === 'winter' && snowActive) f = 'hue-rotate(15deg) brightness(1.05)';
+    else if (df < 0.1) f = 'brightness(0.85)';
+    else if (df > 0.9 && currentSeason === 'summer') f = 'brightness(1.05) saturate(1.1)';
+    renderer.domElement.style.filter = f;
+  }
   // Survival score & auto-save
   survivalTimer += dt;
   saveTimer += dt;
