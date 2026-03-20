@@ -2169,6 +2169,18 @@ function toggleMute() {
   document.getElementById('hud-sound').textContent = audioMuted ? 'OFF' : 'ON';
 }
 
+// ── Footstep Sounds ─────────────────────────────────────────────
+let footstepTimer = 0;
+function playFootstep() {
+  if (!audioStarted || audioMuted || inVR) return;
+  const dur = 0.06, freq = currentSeason === 'winter' ? 1200 : 400;
+  const osc = audioCtx.createOscillator(); osc.type = 'triangle'; osc.frequency.value = freq + Math.random()*200;
+  const g = audioCtx.createGain(); g.gain.value = 0.015;
+  const bpf = audioCtx.createBiquadFilter(); bpf.type = 'bandpass'; bpf.frequency.value = freq; bpf.Q.value = 2;
+  osc.connect(bpf); bpf.connect(g); g.connect(masterGain); osc.start();
+  g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur); osc.stop(audioCtx.currentTime + dur);
+}
+
 // Start audio on first interaction
 const startAudioOnce = () => { initAudio(); document.removeEventListener('click', startAudioOnce); document.removeEventListener('keydown', startAudioOnce); };
 document.addEventListener('click', startAudioOnce);
@@ -2473,6 +2485,11 @@ function animate() {
 
     camera.position.x += velocity.x * dt;
     camera.position.z += velocity.z * dt;
+    // Footstep sounds
+    if (direction.length() > 0 && onGround) {
+      footstepTimer -= dt; const interval = canSprint ? 0.25 : 0.45;
+      if (footstepTimer <= 0) { playFootstep(); footstepTimer = interval; }
+    } else footstepTimer = 0;
 
     const halfSize = TERRAIN_SIZE * 0.49;
     camera.position.x = THREE.MathUtils.clamp(camera.position.x, -halfSize, halfSize);
