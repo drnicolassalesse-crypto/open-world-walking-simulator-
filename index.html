@@ -926,6 +926,55 @@ function updateCampfires(dt, elapsed) {
   }
 }
 
+// ── Floating Island ─────────────────────────────────────────────────
+{
+  const islandGroup = new THREE.Group();
+  islandGroup.position.set(150, 80, -120);
+  // Island body: flat-top cylinder with green top, brown sides
+  const islandGeo = new THREE.CylinderGeometry(40, 30, 15, 24);
+  const islandMats = [
+    new THREE.MeshStandardMaterial({ color: 0x6B4226, roughness: 0.9, flatShading: true }), // side
+    new THREE.MeshStandardMaterial({ color: 0x3A7D2A, roughness: 0.85 }), // top
+    new THREE.MeshStandardMaterial({ color: 0x5A3A1A, roughness: 0.95, flatShading: true }), // bottom
+  ];
+  const island = new THREE.Mesh(islandGeo, islandMats);
+  island.castShadow = true; island.receiveShadow = true;
+  islandGroup.add(island);
+  // Trees on island
+  const { trunk: iTrunk, foliage1: iF1, foliage2: iF2, foliage3: iF3 } = createTreeGeometry();
+  const iTrunkMat = new THREE.MeshStandardMaterial({ color: 0x5C3A1E, roughness: 0.95 });
+  const iLeafMat = new THREE.MeshStandardMaterial({ color: 0x2D5A1E, roughness: 0.85, flatShading: true });
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2, r = 8 + Math.random() * 20;
+    const tx = Math.cos(a) * r, tz = Math.sin(a) * r;
+    const tg = new THREE.Group();
+    tg.position.set(tx, 7.5, tz);
+    const s = 0.6 + Math.random() * 0.5;
+    tg.scale.set(s, s, s);
+    tg.add(new THREE.Mesh(iTrunk, iTrunkMat));
+    tg.add(new THREE.Mesh(iF1, iLeafMat));
+    tg.add(new THREE.Mesh(iF2, iLeafMat));
+    tg.add(new THREE.Mesh(iF3, iLeafMat));
+    tg.children.forEach(c => { c.castShadow = true; });
+    islandGroup.add(tg);
+  }
+  scene.add(islandGroup);
+  // Wizard NPC on island
+  npcDefs.push({ name:'Zephyr', color:0x9B59B6, msgs:['You found the sky island! The view from up here is breathtaking.','The clouds are so close I can almost touch them.','Few have made it this high. You are special.'] });
+  const zd = npcDefs[npcDefs.length - 1], zg = new THREE.Group();
+  const zMat = new THREE.MeshStandardMaterial({ color: zd.color, roughness: 0.7 });
+  const zBody = new THREE.Mesh(new THREE.CapsuleGeometry(0.45, 1.2, 4, 8), zMat);
+  zBody.position.y = 1.05; zBody.castShadow = true; zg.add(zBody);
+  const zHead = new THREE.Mesh(new THREE.SphereGeometry(0.35, 8, 6), new THREE.MeshStandardMaterial({ color: 0xFFDBAC, roughness: 0.6 }));
+  zHead.position.y = 2.1; zHead.castShadow = true; zg.add(zHead);
+  const zLabel = makeNameSprite('Zephyr'); zLabel.position.y = 3.0; zg.add(zLabel);
+  zg.position.set(150, 87.5, -120);
+  scene.add(zg);
+  npcs.push({ group: zg, bodyMat: zMat, def: zd, msgIdx: 0,
+    walkDir: new THREE.Vector3(0,0,0), walkTimer: 99, pauseTimer: 0, isWalking: false, highlighted: false,
+    questState: 'idle', questGemsNeeded: 5 });
+}
+
 // ── Collectible Gems ────────────────────────────────────────────────
 const GEM_COUNT = 15, GEM_COLLECT_DIST = 2;
 const gemColors = [0xff3333, 0x3399ff, 0x33cc66, 0xffcc00, 0xaa44ff];
@@ -942,6 +991,14 @@ for (let i = 0; i < GEM_COUNT; i++) {
   mesh.castShadow = true;
   scene.add(mesh);
   gems.push({ mesh, baseY: mesh.position.y, collected: false });
+}
+// Special island gem
+{
+  const iGemMat = new THREE.MeshStandardMaterial({ color: 0xff00ff, emissive: 0xff00ff, emissiveIntensity: 0.8, roughness: 0.1, metalness: 0.6 });
+  const iGem = new THREE.Mesh(new THREE.OctahedronGeometry(0.7, 0), iGemMat);
+  iGem.position.set(150, 89.5, -120); iGem.castShadow = true;
+  scene.add(iGem);
+  gems.push({ mesh: iGem, baseY: 89.5, collected: false });
 }
 
 function updateGems(dt, elapsed) {
