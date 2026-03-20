@@ -1110,6 +1110,45 @@ function updateCampfires(dt, elapsed) {
   }
 }
 
+// ── Interactive Campfire ─────────────────────────────────────────
+let playerSitting = false;
+const icfPos = new THREE.Vector3(5, getTerrainHeight(5, 5), 5);
+const icfGroup = new THREE.Group(); icfGroup.position.copy(icfPos);
+for (let i = 0; i < 6; i++) {
+  const a = (i/6)*Math.PI*2, log = new THREE.Mesh(logGeo, logMat);
+  log.position.set(Math.cos(a)*0.5, 0.12, Math.sin(a)*0.5);
+  log.rotation.set(0.3, a, Math.PI/2); icfGroup.add(log);
+}
+const icfLight = new THREE.PointLight(0xff6600, 2.5, 20);
+icfLight.position.set(0, 1, 0); icfGroup.add(icfLight);
+const icfOrbs = [];
+const orbGeo = new THREE.SphereGeometry(0.12, 6, 4);
+for (let i = 0; i < 6; i++) {
+  const orb = new THREE.Mesh(orbGeo, new THREE.MeshBasicMaterial({ color: i%2?0xff8800:0xffcc00, transparent:true, opacity:0.8, depthWrite:false }));
+  orb.userData.angle = (i/6)*Math.PI*2; orb.userData.speed = 0.5+Math.random()*0.5;
+  orb.userData.radius = 0.3+Math.random()*0.2; orb.position.y = 0.5+Math.random()*0.8;
+  icfGroup.add(orb); icfOrbs.push(orb);
+}
+scene.add(icfGroup);
+
+function updateInteractiveCampfire(dt, elapsed) {
+  icfLight.intensity = 2 + Math.random() * 1.5;
+  for (const o of icfOrbs) {
+    o.userData.angle += o.userData.speed * dt;
+    o.position.x = Math.cos(o.userData.angle) * o.userData.radius;
+    o.position.z = Math.sin(o.userData.angle) * o.userData.radius;
+    o.position.y = 0.4 + Math.sin(elapsed * 2 + o.userData.angle) * 0.4;
+  }
+  const pp = inVR ? cameraRig.position : camera.position;
+  const dx = pp.x - icfPos.x, dz = pp.z - icfPos.z, dist = Math.sqrt(dx*dx+dz*dz);
+  const hint = document.getElementById('interact-hint');
+  if (dist < 8 && !playerSitting && !nearestNPC) {
+    hint.textContent = 'Press F to sit'; hint.style.display = 'block';
+  } else if (playerSitting) {
+    hint.textContent = 'Press F to stand'; hint.style.display = 'block';
+  }
+}
+
 // ── Roaming Deer ────────────────────────────────────────────────────
 const deer = [];
 let deerScared = 0;
@@ -2013,7 +2052,7 @@ document.addEventListener('keydown', (e) => {
   if (gamePaused) return;
   keys[e.code] = true;
   if (e.code === 'KeyE' && nearestNPC && !dialogOpen) openNPCDialog(nearestNPC);
-  if (e.code === 'KeyF') tryFish();
+  if (e.code === 'KeyF') { const dx=camera.position.x-icfPos.x,dz=camera.position.z-icfPos.z; if(Math.sqrt(dx*dx+dz*dz)<8||playerSitting){playerSitting=!playerSitting; if(playerSitting)pitch=-0.3;} else tryFish(); }
   if (e.code === 'KeyN') toggleSnow();
   if (e.code === 'KeyZ' && !zHeld) { zHeld=true; zoomLevel=3; targetFOV=ZOOM_FOVS[3]; }
   if (e.code === 'Space' && onGround) { velocityY = 8; onGround = false; }
@@ -2026,7 +2065,7 @@ initVR();
 // ── Ambient Soundtrack ──────────────────────────────────────────
 let audioCtx = null, audioMuted = false, audioStarted = false;
 let dayOsc, nightOsc, forestOsc, dayGain, nightGain, forestGain, masterGain;
-let cricketGains = [], windGain, birdGain, birdOsc, winterWindGain, winterWindBpf;
+let cricketGains = [], windGain, birdGain, birdOsc, winterWindGain, winterWindBpf, crackleGain;
 
 function initAudio() {
   if (audioStarted) return;
@@ -2077,6 +2116,13 @@ function initAudio() {
   winterWindGain = audioCtx.createGain(); winterWindGain.gain.value = 0;
   const wwPan = audioCtx.createStereoPanner(); wwPan.pan.value = -0.4;
   wwSrc.connect(winterWindBpf); winterWindBpf.connect(winterWindGain); winterWindGain.connect(wwPan); wwPan.connect(masterGain); wwSrc.start();
+  // Campfire crackle: filtered noise bursts
+  const crBuf = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
+  const crD = crBuf.getChannelData(0); for(let i=0;i<bufSize;i++) crD[i]=(Math.random()*2-1)*(Math.random()>0.95?1:0.05);
+  const crSrc = audioCtx.createBufferSource(); crSrc.buffer=crBuf; crSrc.loop=true;
+  const crBpf = audioCtx.createBiquadFilter(); crBpf.type='highpass'; crBpf.frequency.value=800;
+  crackleGain = audioCtx.createGain(); crackleGain.gain.value=0;
+  crSrc.connect(crBpf); crBpf.connect(crackleGain); crackleGain.connect(masterGain); crSrc.start();
   // Waterfall: white noise through 200Hz bandpass
   const wfBuf = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
   const wfD = wfBuf.getChannelData(0); for (let i = 0; i < bufSize; i++) wfD[i] = Math.random()*2-1;
@@ -2108,6 +2154,8 @@ function updateAudio(dt) {
     const birdVol = Math.max(dawn, dusk) * (currentSeason === 'winter' ? 0.003 : 0.012);
     birdGain.gain.value += (birdVol - birdGain.gain.value) * 2 * dt;
   }
+  // Campfire crackle
+  if (crackleGain) { const cd=Math.sqrt((pp.x-icfPos.x)**2+(pp.z-icfPos.z)**2); crackleGain.gain.value+=(Math.max(0,1-cd/15)*0.025-crackleGain.gain.value)*2*dt; }
   // Winter wind howl
   if (winterWindGain) {
     const wwVol = currentSeason === 'winter' ? 0.03 * windStrength : 0;
@@ -2399,6 +2447,7 @@ function animate() {
     }
   } else if (isLocked) {
     // ── Desktop locomotion ──
+    if (playerSitting) { velocity.x = 0; velocity.z = 0; }
     const wantSprint = keys['ShiftLeft'] || keys['ShiftRight'];
     const canSprint = wantSprint && !sprintLocked && stamina > 0;
     const speed = canSprint ? RUN_SPEED : WALK_SPEED;
@@ -2485,6 +2534,7 @@ function animate() {
 
   // Campfires & Fireflies
   updateCampfires(dt, clock.elapsedTime);
+  updateInteractiveCampfire(dt, clock.elapsedTime);
   updateFireflies(dt, clock.elapsedTime);
 
   // Minimap (desktop only)
