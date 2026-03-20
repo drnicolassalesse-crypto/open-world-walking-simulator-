@@ -296,7 +296,7 @@
 <div id="rain-overlay"></div>
 <div id="lightning-flash"></div>
 <div id="save-toast">Game saved</div>
-<div id="settings-panel"><button id="reset-save-btn">Reset Save</button><div style="margin-top:8px;font-size:11px;color:#ccc">Season:</div><div style="margin-top:4px;display:flex;gap:4px"><button class="season-btn" data-season="spring" onclick="setSeason('spring')">Spring</button><button class="season-btn" data-season="summer" onclick="setSeason('summer')">Summer</button><button class="season-btn" data-season="autumn" onclick="setSeason('autumn')">Autumn</button><button class="season-btn" data-season="winter" onclick="setSeason('winter')">Winter</button></div></div>
+<div id="settings-panel"><button id="reset-save-btn">Reset Save</button><div style="margin-top:8px;font-size:11px;color:#ccc">Season:</div><div style="margin-top:4px;display:flex;gap:4px"><button class="season-btn" data-season="spring" onclick="setSeason('spring')">Spring</button><button class="season-btn" data-season="summer" onclick="setSeason('summer')">Summer</button><button class="season-btn" data-season="autumn" onclick="setSeason('autumn')">Autumn</button><button class="season-btn" data-season="winter" onclick="setSeason('winter')">Winter</button></div><div id="ach-count" style="margin-top:8px;font-size:11px;color:#FFD700"></div></div>
 <canvas id="minimap" width="150" height="150"></canvas>
 <div id="interact-hint">Press <kbd style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);border-radius:3px;padding:1px 6px">E</kbd> to talk</div>
 <div id="inventory-panel"><h3>Inventory</h3><div id="inv-grid"></div></div>
@@ -614,14 +614,14 @@ function updateFireflies(dt, elapsed) {
 
 // ── Weather System ──────────────────────────────────────────────────
 let weather = 'clear', weatherTimer = 60 + Math.random() * 60, snowMode = false;
-let weatherFogTarget = 0, weatherSunTarget = 1;
+let weatherFogTarget = 0, weatherSunTarget = 1, prevTimeOfDay = 0.3, rainChanceRolled = false;
 const rainOverlay = document.getElementById('rain-overlay');
 const lightningFlash = document.getElementById('lightning-flash');
 const hudWeather = document.getElementById('hud-weather');
 const baseFogDensity = 0.0018;
 
 // Rain particles
-const RAIN_COUNT = 500;
+const RAIN_COUNT = 1200;
 const rainGeo = new THREE.BufferGeometry();
 const rainPositions = new Float32Array(RAIN_COUNT * 6); // 2 verts per line
 rainGeo.setAttribute('position', new THREE.BufferAttribute(rainPositions, 3));
@@ -652,7 +652,7 @@ function triggerLightning() {
 }
 
 function updateWeatherIcon() {
-  hudWeather.textContent = snowMode ? '❄️ Snow' : weather === 'rain' ? '🌧️ Rain' : '☀️ Clear';
+  hudWeather.textContent = currentSeason==='winter' ? '❄️ Snow' : weather === 'rain' ? '🌧️ Rain' : '☀️ Clear';
 }
 function toggleSnow() {
   snowMode = !snowMode;
@@ -661,15 +661,28 @@ function toggleSnow() {
   updateWeatherIcon();
 }
 function updateWeather(dt) {
+  // Per-day rain roll for spring/autumn only
+  const canRain = currentSeason === 'spring' || currentSeason === 'autumn';
+  if (timeOfDay < prevTimeOfDay && canRain) { // new day detected
+    rainChanceRolled = Math.random() < 0.4;
+    if (rainChanceRolled && weather === 'clear') {
+      weather = 'rain'; rainLines.visible = true; rainOverlay.style.opacity = '1';
+      updateWeatherIcon(); triggerLightning();
+    }
+  }
+  if (timeOfDay < prevTimeOfDay && !canRain && weather === 'rain') {
+    weather = 'clear'; rainLines.visible = false; rainOverlay.style.opacity = '0'; updateWeatherIcon();
+  }
+  prevTimeOfDay = timeOfDay;
   weatherTimer -= dt;
-  if (weatherTimer <= 0 && !snowMode) {
-    weather = weather === 'clear' ? 'rain' : 'clear';
+  if (weatherTimer <= 0 && !snowMode && canRain) {
+    weather = weather === 'clear' ? (rainChanceRolled ? 'rain' : 'clear') : 'clear';
     weatherTimer = 60 + Math.random() * 60;
     rainLines.visible = weather === 'rain';
     rainOverlay.style.opacity = weather === 'rain' ? '1' : '0';
     updateWeatherIcon();
     if (weather === 'rain') triggerLightning();
-  }
+  } else if (weatherTimer <= 0) { weatherTimer = 60 + Math.random() * 60; }
   // Fog & sun lerp
   weatherFogTarget = weather === 'rain' ? 0.02 : baseFogDensity;
   weatherSunTarget = weather === 'rain' ? 0.3 : 1;
@@ -2057,7 +2070,7 @@ document.addEventListener('keydown', (e) => {
   if (gamePaused) return;
   keys[e.code] = true;
   if (e.code === 'KeyE' && nearestNPC && !dialogOpen) openNPCDialog(nearestNPC);
-  if (e.code === 'KeyF') { const dx=camera.position.x-icfPos.x,dz=camera.position.z-icfPos.z; if(Math.sqrt(dx*dx+dz*dz)<8||playerSitting){playerSitting=!playerSitting; if(playerSitting)pitch=-0.3;} else tryFish(); }
+  if (e.code === 'KeyF') { const dx=camera.position.x-icfPos.x,dz=camera.position.z-icfPos.z; if(Math.sqrt(dx*dx+dz*dz)<8||playerSitting){playerSitting=!playerSitting; if(playerSitting){pitch=-0.3;campfireSitCount++;}} else tryFish(); }
   if (e.code === 'KeyN') toggleSnow();
   if (e.code === 'KeyZ' && !zHeld) { zHeld=true; zoomLevel=3; targetFOV=ZOOM_FOVS[3]; }
   if (e.code === 'Space' && onGround) { velocityY = 8; onGround = false; }
@@ -2070,7 +2083,7 @@ initVR();
 // ── Ambient Soundtrack ──────────────────────────────────────────
 let audioCtx = null, audioMuted = false, audioStarted = false;
 let dayOsc, nightOsc, forestOsc, dayGain, nightGain, forestGain, masterGain;
-let cricketGains = [], windGain, birdGain, birdOsc, winterWindGain, winterWindBpf, crackleGain;
+let cricketGains = [], windGain, birdGain, birdOsc, winterWindGain, winterWindBpf, crackleGain, rainSndGain;
 
 function initAudio() {
   if (audioStarted) return;
@@ -2128,6 +2141,13 @@ function initAudio() {
   const crBpf = audioCtx.createBiquadFilter(); crBpf.type='highpass'; crBpf.frequency.value=800;
   crackleGain = audioCtx.createGain(); crackleGain.gain.value=0;
   crSrc.connect(crBpf); crBpf.connect(crackleGain); crackleGain.connect(masterGain); crSrc.start();
+  // Rain pitter-patter: filtered noise
+  const rnBuf = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
+  const rnD = rnBuf.getChannelData(0); for(let i=0;i<bufSize;i++) rnD[i]=Math.random()*2-1;
+  const rnSrc = audioCtx.createBufferSource(); rnSrc.buffer=rnBuf; rnSrc.loop=true;
+  const rnBpf = audioCtx.createBiquadFilter(); rnBpf.type='bandpass'; rnBpf.frequency.value=3000; rnBpf.Q.value=0.3;
+  rainSndGain = audioCtx.createGain(); rainSndGain.gain.value=0;
+  rnSrc.connect(rnBpf); rnBpf.connect(rainSndGain); rainSndGain.connect(masterGain); rnSrc.start();
   // Waterfall: white noise through 200Hz bandpass
   const wfBuf = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
   const wfD = wfBuf.getChannelData(0); for (let i = 0; i < bufSize; i++) wfD[i] = Math.random()*2-1;
@@ -2159,6 +2179,8 @@ function updateAudio(dt) {
     const birdVol = Math.max(dawn, dusk) * (currentSeason === 'winter' ? 0.003 : 0.012);
     birdGain.gain.value += (birdVol - birdGain.gain.value) * 2 * dt;
   }
+  // Rain sound
+  if (rainSndGain) { const rv = weather==='rain' ? 0.02 : 0; rainSndGain.gain.value+=(rv-rainSndGain.gain.value)*2*dt; }
   // Campfire crackle
   if (crackleGain) { const cd=Math.sqrt((pp.x-icfPos.x)**2+(pp.z-icfPos.z)**2); crackleGain.gain.value+=(Math.max(0,1-cd/15)*0.025-crackleGain.gain.value)*2*dt; }
   // Winter wind howl
@@ -2225,22 +2247,27 @@ updateScoreHUD();
 
 // ── Achievements ────────────────────────────────────────────────
 let achOpen=false, totalDist=0, nightCount=0, wasNight=false, npcsSpokenTo=new Set();
+let nightMinutes=0, seasonsVisited=new Set(), photoCount=0, campfireSitCount=0;
 const achPanel=document.getElementById('achieve-panel'), achBanner=document.getElementById('achieve-banner');
 let achState=JSON.parse(localStorage.getItem('wandererAchievements')||'{}');
-if(!achState.unlocked) achState={unlocked:{},dist:0,nights:0,spoken:[]};
+if(!achState.unlocked) achState={unlocked:{},dist:0,nights:0,spoken:[],nightMin:0,seasons:[],photos:0,sits:0};
 totalDist=achState.dist||0; nightCount=achState.nights||0; npcsSpokenTo=new Set(achState.spoken||[]);
+nightMinutes=achState.nightMin||0; seasonsVisited=new Set(achState.seasons||[]); photoCount=achState.photos||0; campfireSitCount=achState.sits||0;
 const ACHIEVEMENTS=[
-  {id:'explorer',name:'Explorer',desc:'Move 500 units',max:500,get cur(){return Math.min(totalDist,500);},check(){return totalDist>=500;}},
-  {id:'gemcollector',name:'Gem Collector',desc:'Collect 10 gems',max:10,get cur(){return Math.min(gemsCollected,10);},check(){return gemsCollected>=10;}},
-  {id:'treasure',name:'Treasure Hunter',desc:'Open the chest',max:1,get cur(){return chestOpened?1:0;},check(){return chestOpened;}},
-  {id:'nightowl',name:'Night Owl',desc:'Spend 3 nights',max:3,get cur(){return Math.min(nightCount,3);},check(){return nightCount>=3;}},
-  {id:'social',name:'Social Butterfly',desc:'Talk to all 4 NPCs',max:4,get cur(){return Math.min(npcsSpokenTo.size,4);},check(){return npcsSpokenTo.size>=4;}},
+  {id:'explorer',name:'Explorer',desc:'Walk 500 units',max:500,get cur(){return Math.min(totalDist,500);},check(){return totalDist>=500;}},
+  {id:'nightowl2',name:'Night Owl',desc:'10 min at night',max:10,get cur(){return Math.min(nightMinutes,10);},check(){return nightMinutes>=10;}},
+  {id:'wanderer',name:'Wanderer',desc:'Visit all 4 seasons',max:4,get cur(){return Math.min(seasonsVisited.size,4);},check(){return seasonsVisited.size>=4;}},
+  {id:'photographer',name:'Photographer',desc:'Use Photo Mode 3x',max:3,get cur(){return Math.min(photoCount,3);},check(){return photoCount>=3;}},
+  {id:'campstory',name:'Campfire Stories',desc:'Sit at campfire 3x',max:3,get cur(){return Math.min(campfireSitCount,3);},check(){return campfireSitCount>=3;}},
 ];
 function showAchBanner(name) { achBanner.textContent=`Achievement Unlocked: ${name}`; achBanner.style.top='20px'; setTimeout(()=>{achBanner.style.top='-50px';},3000); }
 function checkAchievements() {
   for(const a of ACHIEVEMENTS) { if(!achState.unlocked[a.id]&&a.check()){achState.unlocked[a.id]=true;showAchBanner(a.name);} }
   achState.dist=totalDist;achState.nights=nightCount;achState.spoken=[...npcsSpokenTo];
+  achState.nightMin=nightMinutes;achState.seasons=[...seasonsVisited];achState.photos=photoCount;achState.sits=campfireSitCount;
   localStorage.setItem('wandererAchievements',JSON.stringify(achState));
+  const uc=Object.keys(achState.unlocked).length;
+  const acEl=document.getElementById('ach-count'); if(acEl) acEl.textContent=`Achievements: ${uc}/${ACHIEVEMENTS.length}`;
 }
 function renderAchievements() {
   const el=document.getElementById('ach-list'); el.innerHTML='';
@@ -2266,6 +2293,7 @@ const seasonFogTint = { spring:new THREE.Color(0xffe0ee), summer:new THREE.Color
 function setSeason(season) {
   currentSeason = season;
   localStorage.setItem('wandererSeason', season);
+  seasonsVisited.add(season);
   // Update foliage
   const fc = seasonFoliageColors[season];
   for (const fm of treeFoliageMeshes) {
@@ -2383,6 +2411,7 @@ const photoHudEls = ['hud','coin-score','minimap','crosshair','stamina-bar','int
 function togglePhotoMode() {
   if (inVR) return;
   photoMode = !photoMode;
+  if (photoMode) photoCount++;
   document.getElementById('photo-overlay').style.display = photoMode ? 'block' : 'none';
   document.getElementById('photo-label').style.display = photoMode ? 'block' : 'none';
   for (const id of photoHudEls) { const el = document.getElementById(id); if (el) el.style.display = photoMode ? 'none' : ''; }
@@ -2560,7 +2589,7 @@ function animate() {
     const seasonIcons = {spring:'🌸',summer:'☀️',autumn:'🍂',winter:'❄️'};
     document.getElementById('stat-season').textContent = `${seasonIcons[currentSeason]||'☀️'} ${currentSeason.charAt(0).toUpperCase()+currentSeason.slice(1)}`;
     document.getElementById('stat-time').textContent = timeStr;
-    document.getElementById('stat-weather').textContent = currentSeason==='winter'&&snowActive ? 'Snowing' : 'Clear';
+    document.getElementById('stat-weather').textContent = currentSeason==='winter'&&snowActive ? 'Snowing' : weather==='rain' ? 'Raining' : 'Clear';
   }
 
   // Weather
@@ -2625,7 +2654,7 @@ function animate() {
 
   // Achievements
   totalDist+=Math.sqrt(velocity.x*velocity.x+velocity.z*velocity.z)*dt;
-  {const isN=timeOfDay>0.85||timeOfDay<0.25;if(isN&&!wasNight)nightCount++;wasNight=isN;} checkAchievements();
+  {const isN=timeOfDay>0.85||timeOfDay<0.25;if(isN){nightMinutes+=dt/60;}if(isN&&!wasNight)nightCount++;wasNight=isN;} checkAchievements();
   // Survival score & auto-save
   survivalTimer += dt;
   saveTimer += dt;
