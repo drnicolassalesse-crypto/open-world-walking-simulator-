@@ -1160,6 +1160,59 @@ function updateBirds(elapsed) {
   }
 }
 
+// ── Stone Bridge ────────────────────────────────────────────────
+{
+  const by = getTerrainHeight(0, -60);
+  const stoneMat = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.9, flatShading: true });
+  // Roadway
+  const road = new THREE.Mesh(new THREE.PlaneGeometry(3, 20), stoneMat);
+  road.rotation.x = -Math.PI / 2; road.position.set(0, by + 0.5, -60);
+  road.receiveShadow = true; scene.add(road);
+  // Railings
+  const railGeo = new THREE.BoxGeometry(0.2, 1, 20);
+  const r1 = new THREE.Mesh(railGeo, stoneMat); r1.position.set(-1.5, by + 1, -60); r1.castShadow = true; scene.add(r1);
+  const r2 = new THREE.Mesh(railGeo, stoneMat); r2.position.set(1.5, by + 1, -60); r2.castShadow = true; scene.add(r2);
+  // Arch supports (half-torus under bridge at 4 points)
+  const archMat = new THREE.MeshStandardMaterial({ color: 0x777777, roughness: 0.95, flatShading: true });
+  const archGeo = new THREE.TorusGeometry(1.2, 0.25, 6, 8, Math.PI);
+  for (const zo of [-55, -50, -65, -70]) {
+    const arch = new THREE.Mesh(archGeo, archMat);
+    arch.position.set(0, by - 0.7, zo); arch.rotation.x = Math.PI; arch.castShadow = true; scene.add(arch);
+  }
+  // Sign post
+  const postGeo = new THREE.BoxGeometry(0.15, 2.5, 0.15);
+  const post = new THREE.Mesh(postGeo, new THREE.MeshStandardMaterial({ color: 0x6B4226, roughness: 0.9 }));
+  post.position.set(2.5, by + 1.25, -50); post.castShadow = true; scene.add(post);
+  const sign = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.6, 0.08),
+    new THREE.MeshStandardMaterial({ color: 0x999988, roughness: 0.85 }));
+  sign.position.set(2.5, by + 2.3, -50); sign.castShadow = true; scene.add(sign);
+}
+
+// ── Torches ─────────────────────────────────────────────────────
+const torches = [];
+{
+  const stickGeo = new THREE.BoxGeometry(0.15, 2, 0.15);
+  const stickMat = new THREE.MeshStandardMaterial({ color: 0x5C3A1E, roughness: 0.9 });
+  const flameGeo = new THREE.SphereGeometry(0.15, 6, 4);
+  const flameMat = new THREE.MeshStandardMaterial({ color: 0xff6600, emissive: 0xff6600, emissiveIntensity: 1 });
+  const torchPositions = [[20,0,10],[-15,0,25],[32,0,48],[-35,0,-28],[60,0,-40],[-50,0,60]];
+  for (const [tx,,tz] of torchPositions) {
+    const ty = getTerrainHeight(tx, tz);
+    const stick = new THREE.Mesh(stickGeo, stickMat);
+    stick.position.set(tx, ty + 1, tz); stick.castShadow = true; scene.add(stick);
+    const flame = new THREE.Mesh(flameGeo, flameMat);
+    flame.position.set(tx, ty + 2.2, tz); scene.add(flame);
+    const light = new THREE.PointLight(0xff6600, 1.5, 10);
+    light.position.set(tx, ty + 2.3, tz); light.castShadow = true;
+    light.shadow.mapSize.set(256, 256); scene.add(light);
+    torches.push({ light, flame });
+  }
+}
+
+function updateTorches() {
+  for (const t of torches) t.light.intensity = 1.0 + Math.random();
+}
+
 // ── Fishing Pond ────────────────────────────────────────────────
 let fishCaught = 0, isFishing = false;
 const fishStatus = document.getElementById('fish-status');
@@ -1244,11 +1297,38 @@ function updateChest(dt) {
     if (chestLidAngle >= Math.PI / 2) {
       chestOpened = true; chestOpening = false;
       coinScore += 50; document.getElementById('coin-score').textContent = `Coins: ${coinScore}`;
+      spawnParticles(new THREE.Vector3(35, getTerrainHeight(35,55)+1, 55), 0xFFD700, 5);
+      spawnParticles(new THREE.Vector3(35, getTerrainHeight(35,55)+1, 55), 0x33cc66, 5);
       for (let i = 0; i < 3; i++) addToInventory('gem');
       const t = document.getElementById('save-toast');
       t.textContent = 'Treasure found! +50 points & 3 gems';
       t.style.opacity = '1'; setTimeout(() => { t.style.opacity = '0'; t.textContent = 'Game saved'; }, 3000);
     }
+  }
+}
+
+// ── Particle Effects ────────────────────────────────────────────────
+const activeParticles = [];
+const particleGeo = new THREE.SphereGeometry(0.1, 4, 3);
+
+function spawnParticles(pos, color, count = 8) {
+  const mat = new THREE.MeshBasicMaterial({ color });
+  for (let i = 0; i < count; i++) {
+    const m = new THREE.Mesh(particleGeo, mat);
+    m.position.copy(pos);
+    const vel = new THREE.Vector3((Math.random()-0.5)*8, Math.random()*4+2, (Math.random()-0.5)*8);
+    scene.add(m);
+    activeParticles.push({ mesh: m, vel, life: 0.5 });
+  }
+}
+
+function updateParticles(dt) {
+  for (let i = activeParticles.length - 1; i >= 0; i--) {
+    const p = activeParticles[i];
+    p.mesh.position.addScaledVector(p.vel, dt);
+    p.vel.y -= 10 * dt;
+    p.life -= dt;
+    if (p.life <= 0) { scene.remove(p.mesh); activeParticles.splice(i, 1); }
   }
 }
 
@@ -1303,6 +1383,7 @@ function updateCoins(dt, elapsed) {
     c.mesh.position.y = c.baseY + Math.sin(elapsed * 2 + c.baseY) * 0.2;
     const dx = pp.x - c.mesh.position.x, dz = pp.z - c.mesh.position.z;
     if (Math.sqrt(dx*dx + dz*dz) < COIN_DIST) {
+      spawnParticles(c.mesh.position.clone(), 0xFFD700);
       c.collected = true; scene.remove(c.mesh); coinScore += 10;
       document.getElementById('coin-score').textContent = `Coins: ${coinScore}`;
       addToInventory('coin');
@@ -1318,9 +1399,11 @@ function updateGems(dt, elapsed) {
     g.mesh.position.y = g.baseY + Math.sin(elapsed * 2 + g.baseY) * 0.3;
     const dx = pp.x - g.mesh.position.x, dz = pp.z - g.mesh.position.z;
     if (Math.sqrt(dx*dx + dz*dz) < GEM_COLLECT_DIST) {
+      const isSpecial = gems.indexOf(g) === gems.length - 1;
+      spawnParticles(g.mesh.position.clone(), isSpecial ? 0xff00ff : 0x33cc66);
       g.collected = true; scene.remove(g.mesh); gemsCollected++;
       document.getElementById('hud-gems').textContent = `${gemsCollected} / ${GEM_COUNT}`;
-      addToInventory(gems.indexOf(g) === gems.length - 1 ? 'specialgem' : 'gem');
+      addToInventory(isSpecial ? 'specialgem' : 'gem');
     }
   }
   // VR: check right controller world position against gems
@@ -1329,9 +1412,11 @@ function updateGems(dt, elapsed) {
     for (const g of gems) {
       if (g.collected) continue;
       if (cPos.distanceTo(g.mesh.position) < GEM_COLLECT_DIST) {
+        const isSpecial = gems.indexOf(g) === gems.length - 1;
+        spawnParticles(g.mesh.position.clone(), isSpecial ? 0xff00ff : 0x33cc66);
         g.collected = true; scene.remove(g.mesh); gemsCollected++;
         document.getElementById('hud-gems').textContent = `${gemsCollected} / ${GEM_COUNT}`;
-        addToInventory(gems.indexOf(g) === gems.length - 1 ? 'specialgem' : 'gem');
+        addToInventory(isSpecial ? 'specialgem' : 'gem');
       }
     }
   }
@@ -1745,6 +1830,8 @@ function animate() {
   updateRuins(dt);
   updateBirds(clock.elapsedTime);
   updateChest(dt);
+  updateTorches();
+  updateParticles(dt);
 
   // Animate water UV
   waterGeo.attributes.uv.array[0] += dt * 0.02; waterGeo.attributes.uv.array[2] += dt * 0.02;
