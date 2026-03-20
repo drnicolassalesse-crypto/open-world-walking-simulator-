@@ -157,6 +157,14 @@
   #pause-menu .pause-btn:hover { background: rgba(255,255,255,0.2); }
   #pause-controls { font-size: 12px; color: rgba(255,255,255,0.5); line-height: 1.8; margin-top: 12px; display: none; }
 
+  #coin-score {
+    position: fixed; top: 20px; right: 20px; z-index: 50;
+    color: #FFD700; font-size: 18px; font-weight: bold;
+    background: rgba(0,0,0,0.35); backdrop-filter: blur(6px);
+    border: 1px solid rgba(255,215,0,0.2); border-radius: 8px;
+    padding: 8px 16px; pointer-events: none;
+  }
+
   #interact-hint {
     position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
     z-index: 50; color: rgba(255,255,255,0.8); font-size: 13px;
@@ -211,6 +219,7 @@
     <div id="pause-controls">WASD=move, Shift=sprint, Space=jump<br>E=talk, Tab=settings, Mouse=look<br>Esc=pause</div>
   </div>
 </div>
+<div id="coin-score">Coins: 0</div>
 <div id="rain-overlay"></div>
 <div id="lightning-flash"></div>
 <div id="save-toast">Game saved</div>
@@ -1071,6 +1080,37 @@ for (let i = 0; i < GEM_COUNT; i++) {
   gems.push({ mesh: iGem, baseY: 89.5, collected: false });
 }
 
+// ── Collectible Coins ────────────────────────────────────────────────
+const COIN_COUNT = 15, COIN_DIST = 1.5;
+const coins = [];
+let coinScore = 0;
+const coinGeo = new THREE.CylinderGeometry(0.3, 0.3, 0.1, 12);
+const coinMat = new THREE.MeshStandardMaterial({ color: 0xFFD700, emissive: 0xFFD700, emissiveIntensity: 0.3, metalness: 0.8, roughness: 0.2 });
+
+for (let i = 0; i < COIN_COUNT; i++) {
+  const mesh = new THREE.Mesh(coinGeo, coinMat);
+  const a = Math.random() * Math.PI * 2, r = 15 + Math.random() * 250;
+  const cx = Math.cos(a) * r, cz = Math.sin(a) * r;
+  mesh.position.set(cx, getTerrainHeight(cx, cz) + 1.2, cz);
+  mesh.castShadow = true;
+  scene.add(mesh);
+  coins.push({ mesh, baseY: mesh.position.y, collected: false });
+}
+
+function updateCoins(dt, elapsed) {
+  const pp = inVR ? cameraRig.position : camera.position;
+  for (const c of coins) {
+    if (c.collected) continue;
+    c.mesh.rotation.y += 0.02;
+    c.mesh.position.y = c.baseY + Math.sin(elapsed * 2 + c.baseY) * 0.2;
+    const dx = pp.x - c.mesh.position.x, dz = pp.z - c.mesh.position.z;
+    if (Math.sqrt(dx*dx + dz*dz) < COIN_DIST) {
+      c.collected = true; scene.remove(c.mesh); coinScore += 10;
+      document.getElementById('coin-score').textContent = `Coins: ${coinScore}`;
+    }
+  }
+}
+
 function updateGems(dt, elapsed) {
   const pp = inVR ? cameraRig.position : camera.position;
   for (const g of gems) {
@@ -1438,8 +1478,9 @@ function animate() {
   minimapCanvas.style.display = inVR ? 'none' : 'block';
   if (!inVR) drawMinimap();
 
-  // Update gems
+  // Update gems & coins
   updateGems(dt, clock.elapsedTime);
+  updateCoins(dt, clock.elapsedTime);
 
   // Update NPCs & Deer
   updateNPCs(dt);
@@ -1497,6 +1538,7 @@ function saveGame() {
     px: camera.position.x, pz: camera.position.z, gems: gemsCollected,
     npcQuests: npcs.map(n => n.questState),
     gemCollected: gems.map(g => g.collected),
+    coinScore, coinCollected: coins.map(c => c.collected),
   };
   localStorage.setItem('wanderer_save', JSON.stringify(data));
   saveToast.style.opacity = '1';
@@ -1515,6 +1557,8 @@ function loadGame() {
     document.getElementById('hud-gems').textContent = `${gemsCollected} / ${GEM_COUNT}`;
     if (d.npcQuests) d.npcQuests.forEach((q, i) => { if (npcs[i]) npcs[i].questState = q; });
     if (d.gemCollected) d.gemCollected.forEach((c, i) => { if (gems[i] && c) { gems[i].collected = true; scene.remove(gems[i].mesh); } });
+    if (d.coinScore) { coinScore = d.coinScore; document.getElementById('coin-score').textContent = `Coins: ${coinScore}`; }
+    if (d.coinCollected) d.coinCollected.forEach((c, i) => { if (coins[i] && c) { coins[i].collected = true; scene.remove(coins[i].mesh); } });
     return true;
   } catch { return false; }
 }
