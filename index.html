@@ -210,6 +210,17 @@
   .quest-status { font-size: 10px; float: right; }
   .quest-status.active { color: #4CAF50; }
   .quest-status.complete { color: #FFD700; }
+  #hall-of-fame {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    z-index: 350; display: none; background: rgba(0,0,0,0.75); backdrop-filter: blur(10px);
+    border: 1px solid rgba(255,215,0,0.3); border-radius: 14px;
+    padding: 24px 28px; color: #fff; min-width: 280px;
+  }
+  #hall-of-fame h3 { font-size: 16px; font-weight: 300; letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 12px; text-align: center; color: #FFD700; }
+  .hof-entry { display: flex; justify-content: space-between; font-size: 13px; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.06); }
+  .hof-rank { color: #FFD700; width: 24px; }
+  .hof-score { font-weight: bold; }
+  .hof-date { color: rgba(255,255,255,0.4); font-size: 11px; }
 </style>
 </head>
 <body>
@@ -239,7 +250,8 @@
   <span class="label">SKY</span> <span id="hud-weather">☀️ Clear</span><br>
   <span class="label">DEER</span> <span id="hud-deer">0 scared</span><br>
   <span class="label">FISH</span> <span id="hud-fish">0 caught</span><br>
-  <span class="label">SND</span> <span id="hud-sound">ON</span>
+  <span class="label">SND</span> <span id="hud-sound">ON</span><br>
+  <span class="label">BEST</span> <span id="hud-best">0</span>
   <div id="stamina-bar"><div id="stamina-fill" style="background:#4CAF50"></div></div>
 </div>
 
@@ -257,6 +269,8 @@
     <button class="pause-btn" id="pause-resume">Resume</button>
     <button class="pause-btn" id="pause-controls-btn">Controls</button>
     <button class="pause-btn" id="pause-reset">Reset Save</button>
+    <button class="pause-btn" id="pause-hof">Hall of Fame</button>
+    <div id="pause-score" style="font-size:14px;color:#FFD700;margin-top:8px"></div>
     <div id="pause-controls">WASD=move, Shift=sprint, Space=jump<br>E=talk, Tab=settings, Mouse=look<br>Esc=pause</div>
   </div>
 </div>
@@ -269,6 +283,7 @@
 <div id="interact-hint">Press <kbd style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);border-radius:3px;padding:1px 6px">E</kbd> to talk</div>
 <div id="inventory-panel"><h3>Inventory</h3><div id="inv-grid"></div></div>
 <div id="fish-status"></div>
+<div id="hall-of-fame"><h3>Hall of Fame</h3><div id="hof-list"></div></div>
 <div id="quest-log"><h3>Quest Log</h3><div id="quest-list"></div></div>
 
 <script type="importmap">
@@ -1760,7 +1775,7 @@ document.addEventListener('mousemove', (e) => {
 function togglePause() {
   gamePaused = !gamePaused;
   pauseMenu.style.display = gamePaused ? 'flex' : 'none';
-  if (gamePaused) { document.exitPointerLock(); }
+  if (gamePaused) { document.exitPointerLock(); document.getElementById('pause-score').textContent = `Score: ${getCurrentScore()}`; }
   else { renderer.domElement.requestPointerLock(); }
 }
 document.getElementById('pause-resume').addEventListener('click', togglePause);
@@ -1768,6 +1783,7 @@ document.getElementById('pause-controls-btn').addEventListener('click', () => {
   const el = document.getElementById('pause-controls');
   el.style.display = el.style.display === 'block' ? 'none' : 'block';
 });
+document.getElementById('pause-hof').addEventListener('click', () => { togglePause(); toggleHOF(); });
 document.getElementById('pause-reset').addEventListener('click', () => {
   localStorage.removeItem('wanderer_save');
   saveToast.style.opacity = '1'; saveToast.textContent = 'Save cleared';
@@ -1778,6 +1794,8 @@ document.addEventListener('keydown', (e) => {
   if (e.code === 'KeyI') { toggleInventory(); return; }
   if (e.code === 'KeyQ') { toggleQuestLog(); return; }
   if (e.code === 'KeyM') { toggleMute(); return; }
+  if (e.code === 'KeyH') { toggleHOF(); return; }
+  if (e.code === 'Escape' && hofOpen) { toggleHOF(); return; }
   if (e.code === 'Escape' && questLogOpen) { toggleQuestLog(); return; }
   if (e.code === 'Escape' && inventoryOpen) { toggleInventory(); return; }
   if (e.code === 'Escape' && dialogOpen) { closeDialog(); return; }
@@ -1842,6 +1860,38 @@ function toggleMute() {
 const startAudioOnce = () => { initAudio(); document.removeEventListener('click', startAudioOnce); document.removeEventListener('keydown', startAudioOnce); };
 document.addEventListener('click', startAudioOnce);
 document.addEventListener('keydown', startAudioOnce);
+
+// ── High Score System ────────────────────────────────────────────
+let survivalTimer = 0, totalScore = 0, hofOpen = false;
+const hofPanel = document.getElementById('hall-of-fame');
+const hofList = document.getElementById('hof-list');
+
+function getScores() {
+  try { return JSON.parse(localStorage.getItem('wandererScores') || '[]'); } catch { return []; }
+}
+function saveScore() {
+  const scores = getScores();
+  scores.push({ score: getCurrentScore(), date: new Date().toLocaleDateString() });
+  scores.sort((a, b) => b.score - a.score);
+  localStorage.setItem('wandererScores', JSON.stringify(scores.slice(0, 5)));
+}
+function getCurrentScore() { return coinScore + gemsCollected * 10 + (chestOpened ? 50 : 0) + fishCaught * 5 + Math.floor(survivalTimer / 10); }
+function updateScoreHUD() {
+  const best = getScores()[0];
+  document.getElementById('hud-best').textContent = best ? best.score : 0;
+}
+function renderHOF() {
+  const scores = getScores();
+  hofList.innerHTML = scores.length === 0 ? '<div style="color:rgba(255,255,255,0.4);text-align:center">No scores yet</div>' :
+    scores.map((s, i) => `<div class="hof-entry"><span class="hof-rank">#${i+1}</span><span class="hof-score">${s.score}</span><span class="hof-date">${s.date}</span></div>`).join('');
+}
+function toggleHOF() {
+  hofOpen = !hofOpen;
+  hofPanel.style.display = hofOpen ? 'block' : 'none';
+  if (hofOpen) { renderHOF(); if (!inVR) document.exitPointerLock(); }
+  else if (!inVR && !gamePaused) renderer.domElement.requestPointerLock();
+}
+updateScoreHUD();
 
 // ── Animation loop ─────────────────────────────────────────────────
 const clock = new THREE.Clock();
@@ -2043,9 +2093,10 @@ function animate() {
     }
   }
 
-  // Auto-save every 10 seconds
+  // Survival score & auto-save
+  survivalTimer += dt;
   saveTimer += dt;
-  if (saveTimer >= 10) { saveTimer = 0; saveGame(); }
+  if (saveTimer >= 10) { saveTimer = 0; saveGame(); saveScore(); updateScoreHUD(); }
 
   renderer.render(scene, camera);
 }
