@@ -225,6 +225,8 @@
   #achieve-panel h3 { font-size:16px;font-weight:300;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:12px;text-align:center;color:#FFD700; }
   .ach-row{margin-bottom:8px;} .ach-name{font-size:12px;font-weight:bold;} .ach-desc{font-size:10px;color:rgba(255,255,255,0.5);} .ach-bar{height:4px;background:rgba(255,255,255,0.1);border-radius:2px;margin-top:2px;overflow:hidden;} .ach-bar-fill{height:100%;border-radius:2px;} .ach-status{float:right;font-size:10px;}
   #achieve-banner{position:fixed;top:-50px;left:50%;transform:translateX(-50%);z-index:500;color:#FFD700;font-size:15px;font-weight:bold;background:rgba(0,0,0,0.7);backdrop-filter:blur(6px);border:1px solid rgba(255,215,0,0.4);border-radius:10px;padding:10px 24px;transition:top 0.5s ease;pointer-events:none;}
+  #photo-overlay{position:fixed;top:0;left:0;width:100%;height:100%;z-index:400;display:none;pointer-events:none;}
+  #photo-label{position:fixed;top:20px;left:20px;z-index:401;display:none;color:rgba(255,255,255,0.7);font-size:13px;letter-spacing:2px;text-transform:uppercase;pointer-events:none;}
   #stats-hud{position:fixed;bottom:20px;left:20px;z-index:50;background:rgba(0,0,0,0.45);backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:6px 12px;color:#ddd;font-size:12px;line-height:1.6;pointer-events:none;}
   #stats-hud .stat-label{color:rgba(255,255,255,0.4);font-size:10px;text-transform:uppercase;letter-spacing:1px;margin-right:4px;}
   #zoom-vignette{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:40;display:none;background:radial-gradient(ellipse at center,transparent 50%,rgba(0,0,0,0.7) 85%,rgba(0,0,0,0.95) 100%);}
@@ -304,6 +306,7 @@
 <div id="achieve-panel"><h3>Achievements</h3><div id="ach-list"></div></div>
 <div id="achieve-banner"></div>
 <div id="zoom-vignette"></div><div id="zoom-hud"></div>
+<div id="photo-overlay"></div><div id="photo-label">PHOTO MODE — Press P to exit</div>
 <div id="stats-hud"><span class="stat-label">SEASON</span><span id="stat-season">☀️ Summer</span><br><span class="stat-label">CLOCK</span><span id="stat-time">12:00</span><br><span class="stat-label">WEATHER</span><span id="stat-weather">Clear</span></div>
 <div id="quest-log"><h3>Quest Log</h3><div id="quest-list"></div></div>
 
@@ -2033,6 +2036,8 @@ document.getElementById('pause-reset').addEventListener('click', () => {
 });
 
 document.addEventListener('keydown', (e) => {
+  if (e.code === 'KeyP' && !inVR) { togglePhotoMode(); return; }
+  if (e.code === 'Escape' && photoMode) { togglePhotoMode(); return; }
   if (e.code === 'KeyI') { toggleInventory(); return; }
   if (e.code === 'KeyQ') { toggleQuestLog(); return; }
   if (e.code === 'KeyM') { toggleMute(); return; }
@@ -2372,6 +2377,18 @@ document.addEventListener('wheel', (e) => {
   targetFOV = ZOOM_FOVS[zoomLevel];
 }, { passive: true });
 
+// ── Photo Mode ──────────────────────────────────────────────────
+let photoMode = false;
+const photoHudEls = ['hud','coin-score','minimap','crosshair','stamina-bar','interact-hint','stats-hud','zoom-hud','zoom-vignette'];
+function togglePhotoMode() {
+  if (inVR) return;
+  photoMode = !photoMode;
+  document.getElementById('photo-overlay').style.display = photoMode ? 'block' : 'none';
+  document.getElementById('photo-label').style.display = photoMode ? 'block' : 'none';
+  for (const id of photoHudEls) { const el = document.getElementById(id); if (el) el.style.display = photoMode ? 'none' : ''; }
+  if (!photoMode && !gamePaused) renderer.domElement.requestPointerLock();
+}
+
 // ── Animation loop ─────────────────────────────────────────────────
 const clock = new THREE.Clock();
 let prevTerrainY = getTerrainHeight(0, 0);
@@ -2459,7 +2476,7 @@ function animate() {
     }
   } else if (isLocked) {
     // ── Desktop locomotion ──
-    if (playerSitting) { velocity.x = 0; velocity.z = 0; }
+    if (playerSitting || photoMode) { velocity.x = 0; velocity.z = 0; }
     const wantSprint = keys['ShiftLeft'] || keys['ShiftRight'];
     const canSprint = wantSprint && !sprintLocked && stamina > 0;
     const speed = canSprint ? RUN_SPEED : WALK_SPEED;
