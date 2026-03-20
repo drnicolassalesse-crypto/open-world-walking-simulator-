@@ -210,6 +210,17 @@
   .quest-status { font-size: 10px; float: right; }
   .quest-status.active { color: #4CAF50; }
   .quest-status.complete { color: #FFD700; }
+  #hall-of-fame {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    z-index: 350; display: none; background: rgba(0,0,0,0.75); backdrop-filter: blur(10px);
+    border: 1px solid rgba(255,215,0,0.3); border-radius: 14px;
+    padding: 24px 28px; color: #fff; min-width: 280px;
+  }
+  #hall-of-fame h3 { font-size: 16px; font-weight: 300; letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 12px; text-align: center; color: #FFD700; }
+  .hof-entry { display: flex; justify-content: space-between; font-size: 13px; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.06); }
+  .hof-rank { color: #FFD700; width: 24px; }
+  .hof-score { font-weight: bold; }
+  .hof-date { color: rgba(255,255,255,0.4); font-size: 11px; }
 </style>
 </head>
 <body>
@@ -239,7 +250,8 @@
   <span class="label">SKY</span> <span id="hud-weather">☀️ Clear</span><br>
   <span class="label">DEER</span> <span id="hud-deer">0 scared</span><br>
   <span class="label">FISH</span> <span id="hud-fish">0 caught</span><br>
-  <span class="label">SND</span> <span id="hud-sound">ON</span>
+  <span class="label">SND</span> <span id="hud-sound">ON</span><br>
+  <span class="label">BEST</span> <span id="hud-best">0</span>
   <div id="stamina-bar"><div id="stamina-fill" style="background:#4CAF50"></div></div>
 </div>
 
@@ -257,6 +269,8 @@
     <button class="pause-btn" id="pause-resume">Resume</button>
     <button class="pause-btn" id="pause-controls-btn">Controls</button>
     <button class="pause-btn" id="pause-reset">Reset Save</button>
+    <button class="pause-btn" id="pause-hof">Hall of Fame</button>
+    <div id="pause-score" style="font-size:14px;color:#FFD700;margin-top:8px"></div>
     <div id="pause-controls">WASD=move, Shift=sprint, Space=jump<br>E=talk, Tab=settings, Mouse=look<br>Esc=pause</div>
   </div>
 </div>
@@ -269,6 +283,7 @@
 <div id="interact-hint">Press <kbd style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);border-radius:3px;padding:1px 6px">E</kbd> to talk</div>
 <div id="inventory-panel"><h3>Inventory</h3><div id="inv-grid"></div></div>
 <div id="fish-status"></div>
+<div id="hall-of-fame"><h3>Hall of Fame</h3><div id="hof-list"></div></div>
 <div id="quest-log"><h3>Quest Log</h3><div id="quest-list"></div></div>
 
 <script type="importmap">
@@ -573,7 +588,8 @@ function updateFireflies(dt, elapsed) {
 }
 
 // ── Weather System ──────────────────────────────────────────────────
-let weather = 'clear', weatherTimer = 60 + Math.random() * 60;
+let weather = 'clear', weatherTimer = 60 + Math.random() * 60, snowMode = false;
+let weatherFogTarget = 0, weatherSunTarget = 1;
 const rainOverlay = document.getElementById('rain-overlay');
 const lightningFlash = document.getElementById('lightning-flash');
 const hudWeather = document.getElementById('hud-weather');
@@ -589,6 +605,17 @@ const rainLines = new THREE.LineSegments(rainGeo, rainMat);
 rainLines.visible = false;
 scene.add(rainLines);
 
+// Snow particles
+const SNOW_COUNT = 20;
+const snowFlakes = [];
+const snowGeo = new THREE.BoxGeometry(0.1, 0.1, 0.1);
+const snowMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+for (let i = 0; i < SNOW_COUNT; i++) {
+  const m = new THREE.Mesh(snowGeo, snowMat);
+  m.visible = false; scene.add(m);
+  snowFlakes.push({ mesh: m, vy: 0.8 + Math.random() * 0.5 });
+}
+
 function triggerLightning() {
   lightningFlash.style.transition = 'opacity 0.05s';
   lightningFlash.style.opacity = '0.7';
@@ -599,17 +626,30 @@ function triggerLightning() {
   }, 2000);
 }
 
+function updateWeatherIcon() {
+  hudWeather.textContent = snowMode ? '❄️ Snow' : weather === 'rain' ? '🌧️ Rain' : '☀️ Clear';
+}
+function toggleSnow() {
+  snowMode = !snowMode;
+  if (snowMode && weather === 'rain') { weather = 'clear'; rainLines.visible = false; rainOverlay.style.opacity = '0'; weatherTimer = 60 + Math.random() * 60; }
+  snowFlakes.forEach(s => { s.mesh.visible = snowMode; });
+  updateWeatherIcon();
+}
 function updateWeather(dt) {
   weatherTimer -= dt;
-  if (weatherTimer <= 0) {
+  if (weatherTimer <= 0 && !snowMode) {
     weather = weather === 'clear' ? 'rain' : 'clear';
     weatherTimer = 60 + Math.random() * 60;
     rainLines.visible = weather === 'rain';
     rainOverlay.style.opacity = weather === 'rain' ? '1' : '0';
-    hudWeather.textContent = weather === 'rain' ? '🌧️ Rain' : '☀️ Clear';
+    updateWeatherIcon();
     if (weather === 'rain') triggerLightning();
   }
-  scene.fog.density = weather === 'rain' ? baseFogDensity * 2.5 : baseFogDensity;
+  // Fog & sun lerp
+  weatherFogTarget = weather === 'rain' ? 0.02 : baseFogDensity;
+  weatherSunTarget = weather === 'rain' ? 0.3 : 1;
+  scene.fog.density += (weatherFogTarget - scene.fog.density) * 2 * dt;
+  sunLight.intensity += (weatherSunTarget * 2.2 - sunLight.intensity) * 2 * dt;
   if (weather === 'rain') {
     const pp = inVR ? cameraRig.position : camera.position;
     const arr = rainGeo.attributes.position.array;
@@ -626,6 +666,17 @@ function updateWeather(dt) {
       }
     }
     rainGeo.attributes.position.needsUpdate = true;
+  }
+  // Snow update
+  if (snowMode) {
+    const sp = inVR ? cameraRig.position : camera.position;
+    for (const s of snowFlakes) {
+      s.mesh.position.y -= s.vy * dt;
+      s.mesh.rotation.x += dt; s.mesh.rotation.z += dt * 0.5;
+      if (s.mesh.position.y < getTerrainHeight(s.mesh.position.x, s.mesh.position.z)) {
+        s.mesh.position.set(sp.x + (Math.random()-0.5)*40, sp.y + 15 + Math.random()*10, sp.z + (Math.random()-0.5)*40);
+      }
+    }
   }
 }
 
@@ -1724,7 +1775,7 @@ document.addEventListener('mousemove', (e) => {
 function togglePause() {
   gamePaused = !gamePaused;
   pauseMenu.style.display = gamePaused ? 'flex' : 'none';
-  if (gamePaused) { document.exitPointerLock(); }
+  if (gamePaused) { document.exitPointerLock(); document.getElementById('pause-score').textContent = `Score: ${getCurrentScore()}`; }
   else { renderer.domElement.requestPointerLock(); }
 }
 document.getElementById('pause-resume').addEventListener('click', togglePause);
@@ -1732,6 +1783,7 @@ document.getElementById('pause-controls-btn').addEventListener('click', () => {
   const el = document.getElementById('pause-controls');
   el.style.display = el.style.display === 'block' ? 'none' : 'block';
 });
+document.getElementById('pause-hof').addEventListener('click', () => { togglePause(); toggleHOF(); });
 document.getElementById('pause-reset').addEventListener('click', () => {
   localStorage.removeItem('wanderer_save');
   saveToast.style.opacity = '1'; saveToast.textContent = 'Save cleared';
@@ -1742,6 +1794,8 @@ document.addEventListener('keydown', (e) => {
   if (e.code === 'KeyI') { toggleInventory(); return; }
   if (e.code === 'KeyQ') { toggleQuestLog(); return; }
   if (e.code === 'KeyM') { toggleMute(); return; }
+  if (e.code === 'KeyH') { toggleHOF(); return; }
+  if (e.code === 'Escape' && hofOpen) { toggleHOF(); return; }
   if (e.code === 'Escape' && questLogOpen) { toggleQuestLog(); return; }
   if (e.code === 'Escape' && inventoryOpen) { toggleInventory(); return; }
   if (e.code === 'Escape' && dialogOpen) { closeDialog(); return; }
@@ -1755,6 +1809,7 @@ document.addEventListener('keydown', (e) => {
   keys[e.code] = true;
   if (e.code === 'KeyE' && nearestNPC && !dialogOpen) openNPCDialog(nearestNPC);
   if (e.code === 'KeyF') tryFish();
+  if (e.code === 'KeyN') toggleSnow();
   if (e.code === 'Space' && onGround) { velocityY = 8; onGround = false; }
 });
 document.addEventListener('keyup', (e) => { keys[e.code] = false; });
@@ -1765,6 +1820,7 @@ initVR();
 // ── Ambient Soundtrack ──────────────────────────────────────────
 let audioCtx = null, audioMuted = false, audioStarted = false;
 let dayOsc, nightOsc, forestOsc, dayGain, nightGain, forestGain, masterGain;
+let cricketGains = [], windGain;
 
 function initAudio() {
   if (audioStarted) return;
@@ -1780,6 +1836,25 @@ function initAudio() {
   // Forest drone: 528Hz triangle
   forestOsc = audioCtx.createOscillator(); forestOsc.type = 'triangle'; forestOsc.frequency.value = 528;
   forestGain = audioCtx.createGain(); forestGain.gain.value = 0; forestOsc.connect(forestGain); forestGain.connect(masterGain); forestOsc.start();
+  // Crickets: 3 oscillators with tremolo LFO
+  for (const freq of [3000, 3200, 3400]) {
+    const osc = audioCtx.createOscillator(); osc.type = 'sine'; osc.frequency.value = freq;
+    const g = audioCtx.createGain(); g.gain.value = 0;
+    const lfo = audioCtx.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = 6;
+    const lfoG = audioCtx.createGain(); lfoG.gain.value = 0.005;
+    lfo.connect(lfoG); lfoG.connect(g.gain);
+    osc.connect(g); g.connect(masterGain); osc.start(); lfo.start();
+    cricketGains.push(g);
+  }
+  // Wind: white noise through bandpass
+  const bufSize = audioCtx.sampleRate * 2;
+  const buf = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < bufSize; i++) data[i] = Math.random() * 2 - 1;
+  const windSrc = audioCtx.createBufferSource(); windSrc.buffer = buf; windSrc.loop = true;
+  const bpf = audioCtx.createBiquadFilter(); bpf.type = 'bandpass'; bpf.frequency.value = 400; bpf.Q.value = 0.5;
+  windGain = audioCtx.createGain(); windGain.gain.value = 0.008;
+  windSrc.connect(bpf); bpf.connect(windGain); windGain.connect(masterGain); windSrc.start();
 }
 
 function updateAudio(dt) {
@@ -1793,6 +1868,9 @@ function updateAudio(dt) {
   // Forest zone: x in [-60,-10], z in [-60,10]
   const inForest = pp.x > -60 && pp.x < -10 && pp.z > -60 && pp.z < 10;
   forestGain.gain.value += ((inForest ? 0.015 : 0) - forestGain.gain.value) * 2 * dt;
+  // Crickets: fade in at night (timeOfDay > 0.75 or < 0.25)
+  const nightActive = (timeOfDay > 0.75 || timeOfDay < 0.25) ? 1 : 0;
+  for (const cg of cricketGains) cg.gain.value += (nightActive * 0.01 - cg.gain.value) * 2 * dt;
 }
 
 function toggleMute() {
@@ -1805,6 +1883,38 @@ function toggleMute() {
 const startAudioOnce = () => { initAudio(); document.removeEventListener('click', startAudioOnce); document.removeEventListener('keydown', startAudioOnce); };
 document.addEventListener('click', startAudioOnce);
 document.addEventListener('keydown', startAudioOnce);
+
+// ── High Score System ────────────────────────────────────────────
+let survivalTimer = 0, totalScore = 0, hofOpen = false;
+const hofPanel = document.getElementById('hall-of-fame');
+const hofList = document.getElementById('hof-list');
+
+function getScores() {
+  try { return JSON.parse(localStorage.getItem('wandererScores') || '[]'); } catch { return []; }
+}
+function saveScore() {
+  const scores = getScores();
+  scores.push({ score: getCurrentScore(), date: new Date().toLocaleDateString() });
+  scores.sort((a, b) => b.score - a.score);
+  localStorage.setItem('wandererScores', JSON.stringify(scores.slice(0, 5)));
+}
+function getCurrentScore() { return coinScore + gemsCollected * 10 + (chestOpened ? 50 : 0) + fishCaught * 5 + Math.floor(survivalTimer / 10); }
+function updateScoreHUD() {
+  const best = getScores()[0];
+  document.getElementById('hud-best').textContent = best ? best.score : 0;
+}
+function renderHOF() {
+  const scores = getScores();
+  hofList.innerHTML = scores.length === 0 ? '<div style="color:rgba(255,255,255,0.4);text-align:center">No scores yet</div>' :
+    scores.map((s, i) => `<div class="hof-entry"><span class="hof-rank">#${i+1}</span><span class="hof-score">${s.score}</span><span class="hof-date">${s.date}</span></div>`).join('');
+}
+function toggleHOF() {
+  hofOpen = !hofOpen;
+  hofPanel.style.display = hofOpen ? 'block' : 'none';
+  if (hofOpen) { renderHOF(); if (!inVR) document.exitPointerLock(); }
+  else if (!inVR && !gamePaused) renderer.domElement.requestPointerLock();
+}
+updateScoreHUD();
 
 // ── Animation loop ─────────────────────────────────────────────────
 const clock = new THREE.Clock();
@@ -2006,9 +2116,10 @@ function animate() {
     }
   }
 
-  // Auto-save every 10 seconds
+  // Survival score & auto-save
+  survivalTimer += dt;
   saveTimer += dt;
-  if (saveTimer >= 10) { saveTimer = 0; saveGame(); }
+  if (saveTimer >= 10) { saveTimer = 0; saveGame(); saveScore(); updateScoreHUD(); }
 
   renderer.render(scene, camera);
 }
