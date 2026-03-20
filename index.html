@@ -221,6 +221,13 @@
   .hof-rank { color: #FFD700; width: 24px; }
   .hof-score { font-weight: bold; }
   .hof-date { color: rgba(255,255,255,0.4); font-size: 11px; }
+  #sign-tooltip {
+    position: fixed; top: 25%; left: 50%; transform: translateX(-50%);
+    z-index: 50; color: #fff; font-size: 14px;
+    background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);
+    border: 1px solid rgba(255,255,255,0.15); border-radius: 8px;
+    padding: 6px 16px; pointer-events: none; display: none;
+  }
 </style>
 </head>
 <body>
@@ -284,6 +291,7 @@
 <div id="inventory-panel"><h3>Inventory</h3><div id="inv-grid"></div></div>
 <div id="fish-status"></div>
 <div id="hall-of-fame"><h3>Hall of Fame</h3><div id="hof-list"></div></div>
+<div id="sign-tooltip"></div>
 <div id="quest-log"><h3>Quest Log</h3><div id="quest-list"></div></div>
 
 <script type="importmap">
@@ -1377,6 +1385,36 @@ function updateMushrooms(dt) {
   }
 }
 
+// ── Interactive Signs ────────────────────────────────────────────
+const signs = [];
+const signTooltip = document.getElementById('sign-tooltip');
+{
+  const poleGeo = new THREE.BoxGeometry(0.15, 2, 0.15);
+  const poleMat = new THREE.MeshStandardMaterial({ color: 0x6B4226, roughness: 0.9 });
+  const boardGeo = new THREE.BoxGeometry(1.2, 0.6, 0.1);
+  const boardMat = new THREE.MeshStandardMaterial({ color: 0xC4A35A, roughness: 0.8 });
+  const signDefs = [
+    { x:0, z:-55, text:'Stone Bridge →' }, { x:25, z:45, text:'Ancient Ruins →' },
+    { x:0, z:60, text:'Floating Island ↑' }, { x:8, z:8, text:'Village →' },
+  ];
+  for (const sd of signDefs) {
+    const sy = getTerrainHeight(sd.x, sd.z);
+    const pole = new THREE.Mesh(poleGeo, poleMat); pole.position.set(sd.x, sy+1, sd.z); pole.castShadow = true; scene.add(pole);
+    const board = new THREE.Mesh(boardGeo, boardMat); board.position.set(sd.x, sy+2, sd.z); board.rotation.y = Math.random()*0.3-0.15; board.castShadow = true; scene.add(board);
+    signs.push({ x: sd.x, z: sd.z, text: sd.text });
+  }
+}
+function updateSigns() {
+  const pp = inVR ? cameraRig.position : camera.position;
+  let nearest = null, nearD = 3;
+  for (const s of signs) {
+    const dx = pp.x - s.x, dz = pp.z - s.z, d = Math.sqrt(dx*dx+dz*dz);
+    if (d < nearD) { nearD = d; nearest = s; }
+  }
+  signTooltip.style.display = nearest ? 'block' : 'none';
+  if (nearest) signTooltip.textContent = nearest.text;
+}
+
 // ── Torches ─────────────────────────────────────────────────────
 const torches = [];
 {
@@ -2180,6 +2218,7 @@ function animate() {
   updateAudio(dt);
   updateWaterfalls(dt, clock.elapsedTime);
   updateMushrooms(dt);
+  updateSigns();
 
   // Animate water UV
   waterGeo.attributes.uv.array[0] += dt * 0.02; waterGeo.attributes.uv.array[2] += dt * 0.02;
