@@ -1820,6 +1820,7 @@ initVR();
 // ── Ambient Soundtrack ──────────────────────────────────────────
 let audioCtx = null, audioMuted = false, audioStarted = false;
 let dayOsc, nightOsc, forestOsc, dayGain, nightGain, forestGain, masterGain;
+let cricketGains = [], windGain;
 
 function initAudio() {
   if (audioStarted) return;
@@ -1835,6 +1836,25 @@ function initAudio() {
   // Forest drone: 528Hz triangle
   forestOsc = audioCtx.createOscillator(); forestOsc.type = 'triangle'; forestOsc.frequency.value = 528;
   forestGain = audioCtx.createGain(); forestGain.gain.value = 0; forestOsc.connect(forestGain); forestGain.connect(masterGain); forestOsc.start();
+  // Crickets: 3 oscillators with tremolo LFO
+  for (const freq of [3000, 3200, 3400]) {
+    const osc = audioCtx.createOscillator(); osc.type = 'sine'; osc.frequency.value = freq;
+    const g = audioCtx.createGain(); g.gain.value = 0;
+    const lfo = audioCtx.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = 6;
+    const lfoG = audioCtx.createGain(); lfoG.gain.value = 0.005;
+    lfo.connect(lfoG); lfoG.connect(g.gain);
+    osc.connect(g); g.connect(masterGain); osc.start(); lfo.start();
+    cricketGains.push(g);
+  }
+  // Wind: white noise through bandpass
+  const bufSize = audioCtx.sampleRate * 2;
+  const buf = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < bufSize; i++) data[i] = Math.random() * 2 - 1;
+  const windSrc = audioCtx.createBufferSource(); windSrc.buffer = buf; windSrc.loop = true;
+  const bpf = audioCtx.createBiquadFilter(); bpf.type = 'bandpass'; bpf.frequency.value = 400; bpf.Q.value = 0.5;
+  windGain = audioCtx.createGain(); windGain.gain.value = 0.008;
+  windSrc.connect(bpf); bpf.connect(windGain); windGain.connect(masterGain); windSrc.start();
 }
 
 function updateAudio(dt) {
@@ -1848,6 +1868,9 @@ function updateAudio(dt) {
   // Forest zone: x in [-60,-10], z in [-60,10]
   const inForest = pp.x > -60 && pp.x < -10 && pp.z > -60 && pp.z < 10;
   forestGain.gain.value += ((inForest ? 0.015 : 0) - forestGain.gain.value) * 2 * dt;
+  // Crickets: fade in at night (timeOfDay > 0.75 or < 0.25)
+  const nightActive = (timeOfDay > 0.75 || timeOfDay < 0.25) ? 1 : 0;
+  for (const cg of cricketGains) cg.gain.value += (nightActive * 0.01 - cg.gain.value) * 2 * dt;
 }
 
 function toggleMute() {
