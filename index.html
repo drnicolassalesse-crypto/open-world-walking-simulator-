@@ -66,6 +66,36 @@
   #vr-button:hover { background: rgba(60,60,200,0.6); }
   #vr-button.not-supported { color: rgba(255,255,255,0.4); cursor: default; }
   #vr-button.not-supported:hover { background: rgba(0,0,0,0.6); }
+
+  #npc-dialog {
+    position: fixed; inset: 0; z-index: 300;
+    background: rgba(0,0,0,0.55);
+    display: none; align-items: center; justify-content: center;
+  }
+  #npc-dialog .dialog-box {
+    background: rgba(20,20,30,0.92); backdrop-filter: blur(14px);
+    border: 1px solid rgba(255,255,255,0.15); border-radius: 14px;
+    padding: 32px 40px; max-width: 400px; color: #fff; text-align: center;
+  }
+  #npc-dialog .npc-name {
+    font-size: 20px; font-weight: 300; letter-spacing: 1px;
+    margin-bottom: 10px; text-transform: uppercase;
+  }
+  #npc-dialog .npc-msg { font-size: 14px; color: rgba(255,255,255,0.7); line-height: 1.6; margin-bottom: 20px; }
+  #npc-dialog button {
+    background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.25);
+    border-radius: 8px; color: #fff; padding: 8px 28px; cursor: pointer;
+    font-family: inherit; font-size: 13px; transition: background 0.2s;
+  }
+  #npc-dialog button:hover { background: rgba(255,255,255,0.25); }
+
+  #interact-hint {
+    position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
+    z-index: 50; color: rgba(255,255,255,0.8); font-size: 13px;
+    background: rgba(0,0,0,0.45); backdrop-filter: blur(6px);
+    border: 1px solid rgba(255,255,255,0.12); border-radius: 8px;
+    padding: 8px 18px; pointer-events: none; display: none;
+  }
 </style>
 </head>
 <body>
@@ -91,6 +121,15 @@
   <span class="label">DIR</span> <span id="hud-dir">N</span><br>
   <span class="label">ALT</span> <span id="hud-alt">0</span>m
 </div>
+
+<div id="npc-dialog">
+  <div class="dialog-box">
+    <div class="npc-name" id="dialog-name"></div>
+    <div class="npc-msg" id="dialog-msg"></div>
+    <button id="dialog-close">Close</button>
+  </div>
+</div>
+<div id="interact-hint">Press <kbd style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);border-radius:3px;padding:1px 6px">E</kbd> to talk</div>
 
 <script type="importmap">
 {
@@ -597,6 +636,89 @@ function placeFlowers() {
 
 placeFlowers();
 
+// ── NPCs ──────────────────────────────────────────────────────────
+const NPC_DIST = 5, npcs = [], npcDefs = [
+  { name:'Elara', color:0xE84393, msgs:['The sunset from the hilltop is breathtaking.','Have you seen the flowers by the valley?','I come here to think. It\'s peaceful.'] },
+  { name:'Finn', color:0x0984E3, msgs:['Watch your step on the slopes!','I\'ve been mapping these hills for years.','There\'s a great view to the north.'] },
+  { name:'Sage', color:0x6C5CE7, msgs:['The wind carries stories, if you listen.','Every rock here has a history.','I wonder what lies beyond the fog.'] },
+  { name:'Rowan', color:0x00B894, msgs:['These trees have been here for centuries.','I planted a garden just over that ridge.','Nature always finds a way.'] },
+  { name:'Mira', color:0xFDCB6E, msgs:['Hello, traveler! Beautiful day, isn\'t it?','I love how the light changes here.','Have you explored the eastern hills yet?'] },
+];
+const npcDialog = document.getElementById('npc-dialog');
+const dialogName = document.getElementById('dialog-name');
+const dialogMsg = document.getElementById('dialog-msg');
+const interactHint = document.getElementById('interact-hint');
+let dialogOpen = false, nearestNPC = null;
+
+document.getElementById('dialog-close').addEventListener('click', () => {
+  npcDialog.style.display = 'none'; dialogOpen = false;
+  if (!inVR) renderer.domElement.requestPointerLock();
+});
+
+function makeNameSprite(name) {
+  const c = document.createElement('canvas'); c.width = 256; c.height = 64;
+  const x = c.getContext('2d'); x.font = 'bold 28px Segoe UI, sans-serif';
+  x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.fillStyle = 'rgba(0,0,0,0.5)'; x.fillText(name, 129, 33);
+  x.fillStyle = '#fff'; x.fillText(name, 128, 32);
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthTest: false }));
+  s.scale.set(4, 1, 1); return s;
+}
+
+for (let i = 0; i < npcDefs.length; i++) {
+  const d = npcDefs[i], g = new THREE.Group();
+  const bMat = new THREE.MeshStandardMaterial({ color: d.color, roughness: 0.7 });
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.45, 1.2, 4, 8), bMat);
+  body.position.y = 1.05; body.castShadow = true; g.add(body);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.35, 8, 6), new THREE.MeshStandardMaterial({ color: 0xFFDBAC, roughness: 0.6 }));
+  head.position.y = 2.1; head.castShadow = true; g.add(head);
+  const aGeo = new THREE.BoxGeometry(0.2, 0.8, 0.2);
+  const la = new THREE.Mesh(aGeo, bMat.clone()); la.position.set(-0.65, 1.2, 0); la.castShadow = true;
+  const ra = new THREE.Mesh(aGeo, bMat.clone()); ra.position.set(0.65, 1.2, 0); ra.castShadow = true;
+  g.add(la, ra);
+  const label = makeNameSprite(d.name); label.position.y = 3.0; g.add(label);
+  const ang = (i / npcDefs.length) * Math.PI * 2 + 0.3, rad = 30 + Math.random() * 150;
+  const px = Math.cos(ang) * rad, pz = Math.sin(ang) * rad;
+  g.position.set(px, getTerrainHeight(px, pz), pz);
+  scene.add(g);
+  npcs.push({ group: g, bodyMat: bMat, def: d, msgIdx: 0,
+    walkDir: new THREE.Vector3(Math.random()-0.5, 0, Math.random()-0.5).normalize(),
+    walkTimer: 3 + Math.random() * 2, pauseTimer: 0, isWalking: true, highlighted: false });
+}
+
+function openNPCDialog(npc) {
+  dialogOpen = true;
+  dialogName.textContent = npc.def.name;
+  dialogMsg.textContent = npc.def.msgs[npc.msgIdx++ % npc.def.msgs.length];
+  npcDialog.style.display = 'flex';
+  if (!inVR) document.exitPointerLock();
+}
+
+function updateNPCs(dt) {
+  const pp = inVR ? cameraRig.position : camera.position;
+  nearestNPC = null; let nearD = Infinity;
+  for (const n of npcs) {
+    const p = n.group.position;
+    if (n.isWalking) {
+      p.x += n.walkDir.x * 2.5 * dt; p.z += n.walkDir.z * 2.5 * dt;
+      p.y = getTerrainHeight(p.x, p.z);
+      if ((n.walkTimer -= dt) <= 0) { n.isWalking = false; n.pauseTimer = 1.5 + Math.random() * 2; }
+    } else if ((n.pauseTimer -= dt) <= 0) {
+      n.isWalking = true; n.walkTimer = 3 + Math.random() * 2;
+      n.walkDir.set(Math.random()-0.5, 0, Math.random()-0.5).normalize();
+    }
+    const dx = pp.x - p.x, dz = pp.z - p.z, dist = Math.sqrt(dx*dx + dz*dz);
+    if (dist < NPC_DIST) { n.group.rotation.y = Math.atan2(dx, dz); n.isWalking = false; }
+    const glow = dist < NPC_DIST;
+    if (glow !== n.highlighted) {
+      n.highlighted = glow;
+      n.bodyMat.emissive.copy(glow ? new THREE.Color(n.def.color).multiplyScalar(0.35) : new THREE.Color(0));
+    }
+    if (dist < nearD && dist < NPC_DIST) { nearD = dist; nearestNPC = n; }
+  }
+  interactHint.style.display = (nearestNPC && !dialogOpen) ? 'block' : 'none';
+}
+
 // ── Player / Controls ──────────────────────────────────────────────
 const blocker = document.getElementById('blocker');
 const hudPos = document.getElementById('hud-pos');
@@ -628,7 +750,10 @@ document.addEventListener('mousemove', (e) => {
   pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, pitch));
 });
 
-document.addEventListener('keydown', (e) => { keys[e.code] = true; });
+document.addEventListener('keydown', (e) => {
+  keys[e.code] = true;
+  if (e.code === 'KeyE' && nearestNPC && !dialogOpen) openNPCDialog(nearestNPC);
+});
 document.addEventListener('keyup', (e) => { keys[e.code] = false; });
 
 // Initialize VR (async check, button setup)
@@ -686,6 +811,16 @@ function animate() {
     // Move shadow camera with VR player
     sunLight.position.set(cameraRig.position.x + 300, 400, cameraRig.position.z + 200);
     sunLight.target.position.set(cameraRig.position.x, cameraRig.position.y, cameraRig.position.z);
+
+    // VR A-button (button 4) on right controller to interact with NPC
+    const session = renderer.xr.getSession();
+    if (session) {
+      for (const source of session.inputSources) {
+        if (source.handedness === 'right' && source.gamepad && source.gamepad.buttons[4]) {
+          if (source.gamepad.buttons[4].pressed && nearestNPC && !dialogOpen) openNPCDialog(nearestNPC);
+        }
+      }
+    }
   } else if (isLocked) {
     // ── Desktop locomotion ──
     const speed = keys['ShiftLeft'] || keys['ShiftRight'] ? RUN_SPEED : WALK_SPEED;
@@ -731,6 +866,9 @@ function animate() {
     hudDir.textContent = getCardinal(yaw);
     hudAlt.textContent = (camera.position.y - PLAYER_HEIGHT).toFixed(1);
   }
+
+  // Update NPCs
+  updateNPCs(dt);
 
   // Animate clouds
   for (const cloud of clouds) {
