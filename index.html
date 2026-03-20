@@ -182,7 +182,7 @@
     padding: 24px 28px; color: #fff;
   }
   #inventory-panel h3 { font-size: 16px; font-weight: 300; letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 12px; text-align: center; }
-  #inv-grid { display: grid; grid-template-columns: repeat(4,48px); gap: 6px; }
+  #inv-grid { display: grid; grid-template-columns: repeat(5,48px); gap: 6px; }
   .inv-slot {
     width: 48px; height: 48px; background: rgba(255,255,255,0.06);
     border: 1px solid rgba(255,255,255,0.15); border-radius: 6px;
@@ -1804,8 +1804,8 @@ function updateGems(dt, elapsed) {
 }
 
 // ── Inventory System ──────────────────────────────────────────────
-const MAX_INV = 8;
-const inventory = []; // { type: 'gem'|'specialgem'|'coin', color: hex }
+const MAX_INV = 10;
+const inventory = []; // { type: 'gem'|'specialgem'|'coin'|'rock'|'leaf'|'flower', color: hex }
 let inventoryOpen = false;
 const invPanel = document.getElementById('inventory-panel');
 const invGrid = document.getElementById('inv-grid');
@@ -1824,6 +1824,9 @@ function renderInventory() {
       if (it.type === 'gem') slot.innerHTML = '<span style="color:#33cc66">&#9670;</span>';
       else if (it.type === 'specialgem') slot.innerHTML = '<span style="color:#ff00ff">&#9670;</span>';
       else if (it.type === 'coin') slot.innerHTML = '<span style="color:#FFD700">&#9679;</span>';
+      else if (it.type === 'rock') slot.innerHTML = '<span style="color:#aab">&#9679; Rock</span>';
+      else if (it.type === 'leaf') slot.innerHTML = '<span style="color:#5a5">&#9752; Leaf</span>';
+      else if (it.type === 'flower') slot.innerHTML = '<span style="color:#e5a">&#10047; Flower</span>';
     }
     invGrid.appendChild(slot);
   }
@@ -1835,6 +1838,44 @@ function toggleInventory() {
   else if (!inVR) renderer.domElement.requestPointerLock();
 }
 renderInventory();
+
+// ── Collectible Resources ────────────────────────────────────────
+const resourceDefs = [
+  { type:'rock', color:0x8899aa, emissive:0x334455, geo: new THREE.SphereGeometry(0.3,6,4), pos:[15,0,20] },
+  { type:'leaf', color:0x33aa44, emissive:0x114411, geo: new THREE.BoxGeometry(0.5,0.05,0.3), pos:[-25,0,40] },
+  { type:'flower', color:0xee55aa, emissive:0x551133, geo: new THREE.SphereGeometry(0.25,8,6), pos:[40,0,-30] },
+];
+const resources = [];
+for (const rd of resourceDefs) {
+  const mat = new THREE.MeshStandardMaterial({ color: rd.color, emissive: rd.emissive, emissiveIntensity: 0.5, roughness: 0.5 });
+  const mesh = new THREE.Mesh(rd.geo, mat);
+  const y = getTerrainHeight(rd.pos[0], rd.pos[2]);
+  mesh.position.set(rd.pos[0], y + 0.5, rd.pos[2]);
+  mesh.castShadow = true; scene.add(mesh);
+  resources.push({ mesh, type: rd.type, collected: false, respawnTimer: 0 });
+}
+let nearestResource = null;
+
+function updateResources(dt) {
+  const pp = inVR ? cameraRig.position : camera.position;
+  nearestResource = null; let nearRD = Infinity;
+  for (const r of resources) {
+    if (r.collected) {
+      r.respawnTimer -= dt;
+      if (r.respawnTimer <= 0) { r.collected = false; r.mesh.visible = true; }
+      continue;
+    }
+    r.mesh.rotation.y += dt * 1.2;
+    const dx = pp.x - r.mesh.position.x, dz = pp.z - r.mesh.position.z;
+    const dist = Math.sqrt(dx*dx + dz*dz);
+    if (dist < 4 && dist < nearRD) { nearRD = dist; nearestResource = r; }
+  }
+  const hint = document.getElementById('interact-hint');
+  if (nearestResource && !dialogOpen && !nearestNPC && !playerSitting) {
+    hint.innerHTML = 'Press <kbd style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);border-radius:3px;padding:1px 6px">E</kbd> to pick up ' + nearestResource.type;
+    hint.style.display = 'block';
+  }
+}
 
 // ── Quest Log ────────────────────────────────────────────────────
 let questLogOpen = false;
@@ -1937,6 +1978,30 @@ for (let i = 0; i < npcDefs.length; i++) {
     schedule: 'day' });
 }
 
+function getContextLine(npc) {
+  const pz = (inVR ? cameraRig : camera).position.z;
+  const biome = pz < -50 ? 'forest' : pz > 50 ? 'plains' : 'meadow';
+  const weatherLines = {
+    rain: ['This rain is relentless!','I hope the rain stops soon.','Perfect weather for staying cozy.'],
+    snow: ['Look at all this snow!','Brr, it\'s freezing out here!','The snow makes everything so quiet.'],
+    clear: ['What a beautiful clear sky!','Not a cloud in sight today.','Perfect weather for exploring.']
+  };
+  const seasonLines = {
+    spring: ['The spring flowers are lovely this year.','Everything feels fresh in spring.'],
+    summer: ['It\'s so warm today! I love summer.','Summer days are the longest.'],
+    autumn: ['The autumn colors are stunning.','I can smell fallen leaves in the air.'],
+    winter: ['Winter can be harsh around here.','Stay warm out there, traveler.']
+  };
+  const biomeLines = {
+    meadow: ['This meadow is so peaceful.','The grass here is so lush and green.'],
+    forest: ['These woods can be mysterious at night.','The forest canopy is thick here.'],
+    plains: ['You can see for miles on these plains.','The open plains make me feel free.']
+  };
+  const wx = currentSeason === 'winter' && snowActive ? 'snow' : weather === 'rain' ? 'rain' : 'clear';
+  const pool = [...weatherLines[wx], ...seasonLines[currentSeason] || [], ...biomeLines[biome]];
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
 function openNPCDialog(npc) {
   dialogOpen = true; dialogNPC = npc; dialogShowingChoice = false;
   dialogChoices.style.display = 'none';
@@ -1953,9 +2018,10 @@ function openNPCDialog(npc) {
   } else if (npc.questState === 'quest_given') {
     dialogMsg.textContent = `I need ${npc.questGemsNeeded} gems. You only have ${gemsCollected} so far. Keep looking!`;
   } else {
+    const useContext = Math.random() < 0.4;
     const idx = npc.msgIdx++ % npc.def.msgs.length;
-    dialogMsg.textContent = npc.def.msgs[idx];
-    if (idx === 1 && (npc.def.hint || npc.def.lore)) {
+    dialogMsg.textContent = useContext ? getContextLine(npc) : npc.def.msgs[idx];
+    if (idx === 1 && !useContext && (npc.def.hint || npc.def.lore)) {
       dialogChoices.style.display = 'block'; dialogShowingChoice = true;
     }
   }
@@ -2119,7 +2185,10 @@ document.addEventListener('keydown', (e) => {
   }
   if (gamePaused) return;
   keys[e.code] = true;
-  if (e.code === 'KeyE' && nearestNPC && !dialogOpen) openNPCDialog(nearestNPC);
+  if (e.code === 'KeyE' && nearestResource && !dialogOpen && inventory.length < MAX_INV) {
+    nearestResource.collected = true; nearestResource.mesh.visible = false; nearestResource.respawnTimer = 60;
+    addToInventory(nearestResource.type); nearestResource = null;
+  } else if (e.code === 'KeyE' && nearestNPC && !dialogOpen) openNPCDialog(nearestNPC);
   if (e.code === 'KeyF') { const dx=camera.position.x-icfPos.x,dz=camera.position.z-icfPos.z; if(Math.sqrt(dx*dx+dz*dz)<8||playerSitting){playerSitting=!playerSitting; if(playerSitting){pitch=-0.3;campfireSitCount++;}} else tryFish(); }
   if (e.code === 'KeyN') toggleSnow();
   if (e.code === 'KeyZ' && !zHeld) { zHeld=true; zoomLevel=3; targetFOV=ZOOM_FOVS[3]; }
@@ -2662,6 +2731,7 @@ function animate() {
 
   // Update NPCs & Deer
   updateNPCs(dt);
+  updateResources(dt);
   updateDeer(dt);
   updateRuins(dt);
   updateBirds(clock.elapsedTime);
