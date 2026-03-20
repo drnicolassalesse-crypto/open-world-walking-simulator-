@@ -121,6 +121,15 @@
   }
   #stamina-fill { height: 100%; width: 100%; border-radius: 3px; transition: width 0.1s, background 0.3s; }
 
+  #rain-overlay {
+    position: fixed; inset: 0; z-index: 40; pointer-events: none;
+    background: rgba(20,30,60,0.08); opacity: 0; transition: opacity 1s;
+  }
+  #lightning-flash {
+    position: fixed; inset: 0; z-index: 45; pointer-events: none;
+    background: #fff; opacity: 0; transition: opacity 0.1s;
+  }
+
   #interact-hint {
     position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
     z-index: 50; color: rgba(255,255,255,0.8); font-size: 13px;
@@ -153,7 +162,8 @@
   <span class="label">DIR</span> <span id="hud-dir">N</span><br>
   <span class="label">ALT</span> <span id="hud-alt">0</span>m<br>
   <span class="label">TIME</span> <span id="hud-time">06:00</span><br>
-  <span class="label">GEMS</span> <span id="hud-gems">0 / 15</span>
+  <span class="label">GEMS</span> <span id="hud-gems">0 / 15</span><br>
+  <span class="label">SKY</span> <span id="hud-weather">☀️ Clear</span>
   <div id="stamina-bar"><div id="stamina-fill" style="background:#4CAF50"></div></div>
 </div>
 
@@ -164,6 +174,8 @@
     <button id="dialog-close">Close</button>
   </div>
 </div>
+<div id="rain-overlay"></div>
+<div id="lightning-flash"></div>
 <div id="save-toast">Game saved</div>
 <div id="settings-panel"><button id="reset-save-btn">Reset Save</button></div>
 <canvas id="minimap" width="150" height="150"></canvas>
@@ -416,6 +428,63 @@ function updateFireflies(dt, elapsed) {
     f.mesh.position.y = ty + 1 + Math.sin(elapsed * 2 + f.phase) * 2;
     f.mat.opacity = nightFade * (0.5 + Math.sin(elapsed * 3 + f.phase) * 0.4);
     if (Math.random() < dt * 0.3) f.dir.set(Math.random()-0.5, 0, Math.random()-0.5).normalize();
+  }
+}
+
+// ── Weather System ──────────────────────────────────────────────────
+let weather = 'clear', weatherTimer = 60 + Math.random() * 60;
+const rainOverlay = document.getElementById('rain-overlay');
+const lightningFlash = document.getElementById('lightning-flash');
+const hudWeather = document.getElementById('hud-weather');
+const baseFogDensity = 0.0018;
+
+// Rain particles
+const RAIN_COUNT = 500;
+const rainGeo = new THREE.BufferGeometry();
+const rainPositions = new Float32Array(RAIN_COUNT * 6); // 2 verts per line
+rainGeo.setAttribute('position', new THREE.BufferAttribute(rainPositions, 3));
+const rainMat = new THREE.LineBasicMaterial({ color: 0x8abbde, transparent: true, opacity: 0.4 });
+const rainLines = new THREE.LineSegments(rainGeo, rainMat);
+rainLines.visible = false;
+scene.add(rainLines);
+
+function triggerLightning() {
+  lightningFlash.style.transition = 'opacity 0.05s';
+  lightningFlash.style.opacity = '0.7';
+  setTimeout(() => { lightningFlash.style.transition = 'opacity 0.3s'; lightningFlash.style.opacity = '0'; }, 100);
+  setTimeout(() => {
+    lightningFlash.style.transition = 'opacity 0.05s'; lightningFlash.style.opacity = '0.5';
+    setTimeout(() => { lightningFlash.style.transition = 'opacity 0.4s'; lightningFlash.style.opacity = '0'; }, 80);
+  }, 2000);
+}
+
+function updateWeather(dt) {
+  weatherTimer -= dt;
+  if (weatherTimer <= 0) {
+    weather = weather === 'clear' ? 'rain' : 'clear';
+    weatherTimer = 60 + Math.random() * 60;
+    rainLines.visible = weather === 'rain';
+    rainOverlay.style.opacity = weather === 'rain' ? '1' : '0';
+    hudWeather.textContent = weather === 'rain' ? '🌧️ Rain' : '☀️ Clear';
+    if (weather === 'rain') triggerLightning();
+  }
+  scene.fog.density = weather === 'rain' ? baseFogDensity * 2.5 : baseFogDensity;
+  if (weather === 'rain') {
+    const pp = inVR ? cameraRig.position : camera.position;
+    const arr = rainGeo.attributes.position.array;
+    for (let i = 0; i < RAIN_COUNT; i++) {
+      let idx = i * 6;
+      let y = arr[idx + 1];
+      if (y === 0 || y < getTerrainHeight(arr[idx], arr[idx + 2]) - 2) {
+        const rx = pp.x + (Math.random() - 0.5) * 80, rz = pp.z + (Math.random() - 0.5) * 80;
+        arr[idx] = rx; arr[idx+1] = pp.y + 20 + Math.random() * 30; arr[idx+2] = rz;
+        arr[idx+3] = rx; arr[idx+4] = arr[idx+1] - 1.5; arr[idx+5] = rz;
+      } else {
+        const fall = 35 * dt;
+        arr[idx+1] -= fall; arr[idx+4] -= fall;
+      }
+    }
+    rainGeo.attributes.position.needsUpdate = true;
   }
 }
 
@@ -1117,6 +1186,9 @@ function animate() {
     const totalMin = Math.floor(timeOfDay * 1440);
     hudTime.textContent = `${String(Math.floor(totalMin/60)).padStart(2,'0')}:${String(totalMin%60).padStart(2,'0')}`;
   }
+
+  // Weather
+  updateWeather(dt);
 
   // Fireflies
   updateFireflies(dt, clock.elapsedTime);
