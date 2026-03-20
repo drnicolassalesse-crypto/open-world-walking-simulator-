@@ -1343,6 +1343,40 @@ function updateWaterfalls(dt, elapsed) {
   }
 }
 
+// ── Mushroom Circle ─────────────────────────────────────────────
+let mushroomTriggered = false;
+const MUSH_CENTER = new THREE.Vector3(-20, 0, 30);
+const mushGlow = new THREE.PointLight(0xffffff, 0, 10);
+let mushGlowTimer = 0;
+{
+  MUSH_CENTER.y = getTerrainHeight(-20, 30);
+  mushGlow.position.set(-20, MUSH_CENTER.y + 2, 30); scene.add(mushGlow);
+  const stemGeo = new THREE.CylinderGeometry(0.15, 0.15, 0.8, 6);
+  const stemMat = new THREE.MeshStandardMaterial({ color: 0xeeeeee, roughness: 0.7 });
+  const colors = [0xcc2222, 0x8833aa, 0xcc2222, 0x8833aa, 0xcc2222, 0x8833aa, 0xcc2222, 0x8833aa];
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2, mx = -20 + Math.cos(a) * 5, mz = 30 + Math.sin(a) * 5;
+    const my = getTerrainHeight(mx, mz);
+    const stem = new THREE.Mesh(stemGeo, stemMat); stem.position.set(mx, my + 0.4, mz); stem.castShadow = true; scene.add(stem);
+    const capGeo = new THREE.CylinderGeometry(0.05, 0.5, 0.4, 8);
+    const cap = new THREE.Mesh(capGeo, new THREE.MeshStandardMaterial({ color: colors[i], roughness: 0.6 }));
+    cap.position.set(mx, my + 1, mz); cap.castShadow = true; scene.add(cap);
+  }
+}
+function updateMushrooms(dt) {
+  if (mushGlowTimer > 0) { mushGlowTimer -= dt; mushGlow.intensity = mushGlowTimer > 0 ? 3 * (mushGlowTimer / 2) : 0; }
+  if (mushroomTriggered) return;
+  const pp = inVR ? cameraRig.position : camera.position;
+  const dx = pp.x - MUSH_CENTER.x, dz = pp.z - MUSH_CENTER.z;
+  if (Math.sqrt(dx*dx+dz*dz) < 5) {
+    mushroomTriggered = true; coinScore += 20; mushGlowTimer = 2;
+    document.getElementById('coin-score').textContent = `Coins: ${coinScore}`;
+    const t = document.getElementById('save-toast');
+    t.textContent = 'The fairy ring pulses with ancient magic... +20 score';
+    t.style.opacity = '1'; setTimeout(() => { t.style.opacity = '0'; t.textContent = 'Game saved'; }, 3000);
+  }
+}
+
 // ── Torches ─────────────────────────────────────────────────────
 const torches = [];
 {
@@ -2145,6 +2179,7 @@ function animate() {
   updateParticles(dt);
   updateAudio(dt);
   updateWaterfalls(dt, clock.elapsedTime);
+  updateMushrooms(dt);
 
   // Animate water UV
   waterGeo.attributes.uv.array[0] += dt * 0.02; waterGeo.attributes.uv.array[2] += dt * 0.02;
