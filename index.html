@@ -1937,6 +1937,30 @@ for (let i = 0; i < npcDefs.length; i++) {
     schedule: 'day' });
 }
 
+function getContextLine(npc) {
+  const pz = (inVR ? cameraRig : camera).position.z;
+  const biome = pz < -50 ? 'forest' : pz > 50 ? 'plains' : 'meadow';
+  const weatherLines = {
+    rain: ['This rain is relentless!','I hope the rain stops soon.','Perfect weather for staying cozy.'],
+    snow: ['Look at all this snow!','Brr, it\'s freezing out here!','The snow makes everything so quiet.'],
+    clear: ['What a beautiful clear sky!','Not a cloud in sight today.','Perfect weather for exploring.']
+  };
+  const seasonLines = {
+    spring: ['The spring flowers are lovely this year.','Everything feels fresh in spring.'],
+    summer: ['It\'s so warm today! I love summer.','Summer days are the longest.'],
+    autumn: ['The autumn colors are stunning.','I can smell fallen leaves in the air.'],
+    winter: ['Winter can be harsh around here.','Stay warm out there, traveler.']
+  };
+  const biomeLines = {
+    meadow: ['This meadow is so peaceful.','The grass here is so lush and green.'],
+    forest: ['These woods can be mysterious at night.','The forest canopy is thick here.'],
+    plains: ['You can see for miles on these plains.','The open plains make me feel free.']
+  };
+  const wx = currentSeason === 'winter' && snowActive ? 'snow' : weather === 'rain' ? 'rain' : 'clear';
+  const pool = [...weatherLines[wx], ...seasonLines[currentSeason] || [], ...biomeLines[biome]];
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
 function openNPCDialog(npc) {
   dialogOpen = true; dialogNPC = npc; dialogShowingChoice = false;
   dialogChoices.style.display = 'none';
@@ -1953,9 +1977,10 @@ function openNPCDialog(npc) {
   } else if (npc.questState === 'quest_given') {
     dialogMsg.textContent = `I need ${npc.questGemsNeeded} gems. You only have ${gemsCollected} so far. Keep looking!`;
   } else {
+    const useContext = Math.random() < 0.4;
     const idx = npc.msgIdx++ % npc.def.msgs.length;
-    dialogMsg.textContent = npc.def.msgs[idx];
-    if (idx === 1 && (npc.def.hint || npc.def.lore)) {
+    dialogMsg.textContent = useContext ? getContextLine(npc) : npc.def.msgs[idx];
+    if (idx === 1 && !useContext && (npc.def.hint || npc.def.lore)) {
       dialogChoices.style.display = 'block'; dialogShowingChoice = true;
     }
   }
