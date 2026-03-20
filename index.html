@@ -1160,6 +1160,31 @@ function updateBirds(elapsed) {
   }
 }
 
+// ── Torches ─────────────────────────────────────────────────────
+const torches = [];
+{
+  const stickGeo = new THREE.BoxGeometry(0.15, 2, 0.15);
+  const stickMat = new THREE.MeshStandardMaterial({ color: 0x5C3A1E, roughness: 0.9 });
+  const flameGeo = new THREE.SphereGeometry(0.15, 6, 4);
+  const flameMat = new THREE.MeshStandardMaterial({ color: 0xff6600, emissive: 0xff6600, emissiveIntensity: 1 });
+  const torchPositions = [[20,0,10],[-15,0,25],[32,0,48],[-35,0,-28],[60,0,-40],[-50,0,60]];
+  for (const [tx,,tz] of torchPositions) {
+    const ty = getTerrainHeight(tx, tz);
+    const stick = new THREE.Mesh(stickGeo, stickMat);
+    stick.position.set(tx, ty + 1, tz); stick.castShadow = true; scene.add(stick);
+    const flame = new THREE.Mesh(flameGeo, flameMat);
+    flame.position.set(tx, ty + 2.2, tz); scene.add(flame);
+    const light = new THREE.PointLight(0xff6600, 1.5, 10);
+    light.position.set(tx, ty + 2.3, tz); light.castShadow = true;
+    light.shadow.mapSize.set(256, 256); scene.add(light);
+    torches.push({ light, flame });
+  }
+}
+
+function updateTorches() {
+  for (const t of torches) t.light.intensity = 1.0 + Math.random();
+}
+
 // ── Fishing Pond ────────────────────────────────────────────────
 let fishCaught = 0, isFishing = false;
 const fishStatus = document.getElementById('fish-status');
@@ -1745,6 +1770,7 @@ function animate() {
   updateRuins(dt);
   updateBirds(clock.elapsedTime);
   updateChest(dt);
+  updateTorches();
 
   // Animate water UV
   waterGeo.attributes.uv.array[0] += dt * 0.02; waterGeo.attributes.uv.array[2] += dt * 0.02;
