@@ -1,0 +1,898 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Open World Walking Simulator</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { overflow: hidden; background: #000; font-family: 'Segoe UI', Tahoma, sans-serif; }
+  canvas { display: block; }
+
+  #blocker {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.65);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 100; cursor: pointer;
+  }
+  #blocker .panel {
+    background: rgba(255,255,255,0.08);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 16px;
+    padding: 48px 56px;
+    text-align: center; color: #fff;
+    max-width: 440px;
+  }
+  #blocker h1 {
+    font-size: 28px; font-weight: 300; margin-bottom: 12px;
+    letter-spacing: 2px; text-transform: uppercase;
+  }
+  #blocker p { font-size: 14px; color: rgba(255,255,255,0.6); line-height: 1.7; }
+  #blocker .keys { margin-top: 20px; font-size: 13px; color: rgba(255,255,255,0.45); }
+  #blocker .keys kbd {
+    background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 4px; padding: 2px 8px; margin: 0 2px; font-family: inherit;
+  }
+
+  #hud {
+    position: fixed; bottom: 20px; left: 20px; z-index: 50;
+    color: rgba(255,255,255,0.7); font-size: 12px;
+    background: rgba(0,0,0,0.35); backdrop-filter: blur(6px);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 10px; padding: 14px 18px;
+    line-height: 1.8; pointer-events: none;
+    font-variant-numeric: tabular-nums;
+  }
+  #hud .label { color: rgba(255,255,255,0.35); }
+
+  #crosshair {
+    position: fixed; top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 4px; height: 4px;
+    background: rgba(255,255,255,0.4);
+    border-radius: 50%; z-index: 50;
+    pointer-events: none;
+  }
+
+  #vr-button {
+    position: fixed; bottom: 20px; right: 20px; z-index: 200;
+    background: rgba(0,0,0,0.6); backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,0.2); border-radius: 10px;
+    color: #fff; font-family: inherit; font-size: 14px;
+    padding: 12px 24px; cursor: pointer; display: none;
+    transition: background 0.2s;
+  }
+  #vr-button:hover { background: rgba(60,60,200,0.6); }
+  #vr-button.not-supported { color: rgba(255,255,255,0.4); cursor: default; }
+  #vr-button.not-supported:hover { background: rgba(0,0,0,0.6); }
+
+  #npc-dialog {
+    position: fixed; inset: 0; z-index: 300;
+    background: rgba(0,0,0,0.55);
+    display: none; align-items: center; justify-content: center;
+  }
+  #npc-dialog .dialog-box {
+    background: rgba(20,20,30,0.92); backdrop-filter: blur(14px);
+    border: 1px solid rgba(255,255,255,0.15); border-radius: 14px;
+    padding: 32px 40px; max-width: 400px; color: #fff; text-align: center;
+  }
+  #npc-dialog .npc-name {
+    font-size: 20px; font-weight: 300; letter-spacing: 1px;
+    margin-bottom: 10px; text-transform: uppercase;
+  }
+  #npc-dialog .npc-msg { font-size: 14px; color: rgba(255,255,255,0.7); line-height: 1.6; margin-bottom: 20px; }
+  #npc-dialog button {
+    background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.25);
+    border-radius: 8px; color: #fff; padding: 8px 28px; cursor: pointer;
+    font-family: inherit; font-size: 13px; transition: background 0.2s;
+  }
+  #npc-dialog button:hover { background: rgba(255,255,255,0.25); }
+
+  #interact-hint {
+    position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
+    z-index: 50; color: rgba(255,255,255,0.8); font-size: 13px;
+    background: rgba(0,0,0,0.45); backdrop-filter: blur(6px);
+    border: 1px solid rgba(255,255,255,0.12); border-radius: 8px;
+    padding: 8px 18px; pointer-events: none; display: none;
+  }
+</style>
+</head>
+<body>
+
+<div id="blocker">
+  <div class="panel">
+    <h1>Wanderer</h1>
+    <p>An open world walking simulator.<br>Click anywhere to begin exploring.</p>
+    <div class="keys">
+      <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> Move &nbsp;&middot;&nbsp;
+      <kbd>Mouse</kbd> Look &nbsp;&middot;&nbsp;
+      <kbd>Shift</kbd> Run &nbsp;&middot;&nbsp;
+      <kbd>Esc</kbd> Pause
+    </div>
+  </div>
+</div>
+
+<div id="crosshair"></div>
+<button id="vr-button">Enter VR</button>
+
+<div id="hud">
+  <span class="label">POS</span> <span id="hud-pos">0, 0, 0</span><br>
+  <span class="label">DIR</span> <span id="hud-dir">N</span><br>
+  <span class="label">ALT</span> <span id="hud-alt">0</span>m
+</div>
+
+<div id="npc-dialog">
+  <div class="dialog-box">
+    <div class="npc-name" id="dialog-name"></div>
+    <div class="npc-msg" id="dialog-msg"></div>
+    <button id="dialog-close">Close</button>
+  </div>
+</div>
+<div id="interact-hint">Press <kbd style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);border-radius:3px;padding:1px 6px">E</kbd> to talk</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.163.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.163.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { ImprovedNoise } from 'three/addons/math/ImprovedNoise.js';
+import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
+
+// ── Constants ──────────────────────────────────────────────────────
+const TERRAIN_SIZE = 2000;
+const TERRAIN_SEGMENTS = 256;
+const PLAYER_HEIGHT = 3.5;
+const WALK_SPEED = 18;
+const RUN_SPEED = 36;
+const MOUSE_SENSITIVITY = 0.002;
+const TREE_COUNT = 600;
+const CLOUD_COUNT = 40;
+const GRASS_PATCH_COUNT = 8000;
+
+// ── Renderer ───────────────────────────────────────────────────────
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
+renderer.xr.enabled = true;
+document.body.appendChild(renderer.domElement);
+
+// ── WebXR VR Setup ────────────────────────────────────────────────
+let vrSession = null;
+let inVR = false;
+const vrButton = document.getElementById('vr-button');
+
+// Camera rig: parent group we move for VR locomotion
+const cameraRig = new THREE.Group();
+cameraRig.add(new THREE.PerspectiveCamera()); // placeholder, replaced below
+
+// VR controllers
+const controllerModelFactory = new XRControllerModelFactory();
+let controller0, controller1, grip0, grip1;
+let vrTurnCooldown = 0;
+
+function setupVRControllers() {
+  controller0 = renderer.xr.getController(0);
+  controller1 = renderer.xr.getController(1);
+  grip0 = renderer.xr.getControllerGrip(0);
+  grip1 = renderer.xr.getControllerGrip(1);
+  grip0.add(controllerModelFactory.createControllerModel(grip0));
+  grip1.add(controllerModelFactory.createControllerModel(grip1));
+  cameraRig.add(controller0, controller1, grip0, grip1);
+
+  // Visual ray for each controller
+  const lineGeo = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-3)
+  ]);
+  const lineMat = new THREE.LineBasicMaterial({ color: 0x4488ff, transparent: true, opacity: 0.5 });
+  controller0.add(new THREE.Line(lineGeo.clone(), lineMat.clone()));
+  controller1.add(new THREE.Line(lineGeo.clone(), lineMat.clone()));
+}
+
+async function initVR() {
+  if (!navigator.xr) {
+    vrButton.textContent = 'VR Not Supported';
+    vrButton.classList.add('not-supported');
+    vrButton.style.display = 'block';
+    return;
+  }
+  const supported = await navigator.xr.isSessionSupported('immersive-vr').catch(() => false);
+  if (!supported) {
+    vrButton.textContent = 'VR Not Supported';
+    vrButton.classList.add('not-supported');
+    vrButton.style.display = 'block';
+    return;
+  }
+  vrButton.style.display = 'block';
+  vrButton.addEventListener('click', toggleVR);
+}
+
+async function toggleVR() {
+  if (vrButton.classList.contains('not-supported')) return;
+  if (!inVR) {
+    try {
+      vrSession = await navigator.xr.requestSession('immersive-vr', {
+        optionalFeatures: ['local-floor', 'bounded-floor']
+      });
+      renderer.xr.setSession(vrSession);
+      vrSession.addEventListener('end', () => {
+        inVR = false;
+        vrButton.textContent = 'Enter VR';
+        vrSession = null;
+      });
+      inVR = true;
+      vrButton.textContent = 'Exit VR';
+      // Hide DOM HUD in VR
+      document.getElementById('hud').style.display = 'none';
+      document.getElementById('crosshair').style.display = 'none';
+      blocker.style.display = 'none';
+    } catch (e) {
+      console.warn('Failed to start VR session:', e);
+    }
+  } else if (vrSession) {
+    vrSession.end();
+  }
+}
+
+function getVRThumbstickAxes(handedness) {
+  const session = renderer.xr.getSession();
+  if (!session) return [0, 0];
+  for (const source of session.inputSources) {
+    if (source.handedness === handedness && source.gamepad) {
+      const axes = source.gamepad.axes;
+      // axes[2]=X, axes[3]=Y for thumbstick on standard mapping
+      return [axes[2] || 0, axes[3] || 0];
+    }
+  }
+  return [0, 0];
+}
+
+// ── Scene ──────────────────────────────────────────────────────────
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87CEEB);
+scene.fog = new THREE.FogExp2(0xC8DFF0, 0.0018);
+
+// ── Camera ─────────────────────────────────────────────────────────
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 2000);
+camera.position.set(0, 20, 0);
+
+// Replace placeholder camera in rig with actual camera
+cameraRig.remove(cameraRig.children[0]);
+cameraRig.add(camera);
+setupVRControllers();
+
+// ── Lighting ───────────────────────────────────────────────────────
+const ambientLight = new THREE.HemisphereLight(0x9DC4E8, 0x5A7E3A, 0.7);
+scene.add(ambientLight);
+
+const sunLight = new THREE.DirectionalLight(0xFFF4D6, 2.2);
+sunLight.position.set(300, 400, 200);
+sunLight.castShadow = true;
+sunLight.shadow.mapSize.set(2048, 2048);
+sunLight.shadow.camera.left = -120;
+sunLight.shadow.camera.right = 120;
+sunLight.shadow.camera.top = 120;
+sunLight.shadow.camera.bottom = -120;
+sunLight.shadow.camera.near = 100;
+sunLight.shadow.camera.far = 900;
+sunLight.shadow.bias = -0.001;
+scene.add(sunLight);
+scene.add(sunLight.target);
+
+// ── Sun sphere ─────────────────────────────────────────────────────
+const sunGeo = new THREE.SphereGeometry(12, 16, 16);
+const sunMat = new THREE.MeshBasicMaterial({ color: 0xFFFDE8 });
+const sunMesh = new THREE.Mesh(sunGeo, sunMat);
+sunMesh.position.copy(sunLight.position).normalize().multiplyScalar(800);
+scene.add(sunMesh);
+
+// ── Noise helper ───────────────────────────────────────────────────
+const perlin = new ImprovedNoise();
+
+function fbm(x, z, octaves, lacunarity, gain) {
+  let value = 0, amplitude = 1, frequency = 1, maxVal = 0;
+  for (let i = 0; i < octaves; i++) {
+    value += amplitude * perlin.noise(x * frequency, z * frequency, 0);
+    maxVal += amplitude;
+    amplitude *= gain;
+    frequency *= lacunarity;
+  }
+  return value / maxVal;
+}
+
+// ── Terrain ────────────────────────────────────────────────────────
+function generateTerrain() {
+  const geo = new THREE.PlaneGeometry(TERRAIN_SIZE, TERRAIN_SIZE, TERRAIN_SEGMENTS, TERRAIN_SEGMENTS);
+  geo.rotateX(-Math.PI / 2);
+
+  const verts = geo.attributes.position;
+  const scale = 0.004;
+
+  for (let i = 0; i < verts.count; i++) {
+    const x = verts.getX(i);
+    const z = verts.getZ(i);
+
+    // Multi-octave noise for natural terrain
+    let h = fbm(x * scale, z * scale, 6, 2.0, 0.48) * 60;
+    // Broad rolling hills
+    h += fbm(x * scale * 0.3, z * scale * 0.3, 3, 2.0, 0.5) * 35;
+    // Gentle large undulation
+    h += Math.sin(x * 0.003) * Math.cos(z * 0.004) * 12;
+
+    verts.setY(i, h);
+  }
+
+  geo.computeVertexNormals();
+
+  // Vertex colors for terrain
+  const colors = new Float32Array(verts.count * 3);
+  for (let i = 0; i < verts.count; i++) {
+    const y = verts.getY(i);
+    const normal = new THREE.Vector3();
+    normal.fromBufferAttribute(geo.attributes.normal, i);
+    const slope = 1 - normal.y;
+
+    let r, g, b;
+    if (y < -8) {
+      // Dark green valley
+      r = 0.22; g = 0.38; b = 0.15;
+    } else if (y < 15) {
+      // Lush grass
+      const t = (y + 8) / 23;
+      r = 0.25 + t * 0.15; g = 0.45 + t * 0.12; b = 0.12 + t * 0.08;
+    } else if (y < 40) {
+      // Light grass / dirt
+      const t = (y - 15) / 25;
+      r = 0.35 + t * 0.2; g = 0.52 - t * 0.1; b = 0.18 + t * 0.05;
+    } else {
+      // Rocky top
+      r = 0.55; g = 0.50; b = 0.42;
+    }
+
+    // Slope darkening
+    if (slope > 0.3) {
+      const s = Math.min((slope - 0.3) * 2, 1);
+      r = THREE.MathUtils.lerp(r, 0.35, s);
+      g = THREE.MathUtils.lerp(g, 0.30, s);
+      b = THREE.MathUtils.lerp(b, 0.22, s);
+    }
+
+    // Subtle noise variation
+    const nv = fbm(verts.getX(i) * 0.05, verts.getZ(i) * 0.05, 2, 2, 0.5) * 0.06;
+    colors[i * 3]     = Math.max(0, Math.min(1, r + nv));
+    colors[i * 3 + 1] = Math.max(0, Math.min(1, g + nv));
+    colors[i * 3 + 2] = Math.max(0, Math.min(1, b + nv * 0.5));
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+  const mat = new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    roughness: 0.9,
+    metalness: 0.0,
+    flatShading: false,
+  });
+
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.receiveShadow = true;
+  return mesh;
+}
+
+const terrain = generateTerrain();
+scene.add(terrain);
+scene.add(cameraRig);
+
+// Height sampling via raycaster
+const terrainRaycaster = new THREE.Raycaster();
+const downVec = new THREE.Vector3(0, -1, 0);
+
+function getTerrainHeight(x, z) {
+  terrainRaycaster.set(new THREE.Vector3(x, 500, z), downVec);
+  const hits = terrainRaycaster.intersectObject(terrain);
+  return hits.length > 0 ? hits[0].point.y : 0;
+}
+
+// ── Trees ──────────────────────────────────────────────────────────
+function createTreeGeometry() {
+  // Trunk
+  const trunk = new THREE.CylinderGeometry(0.3, 0.5, 4, 6);
+  trunk.translate(0, 2, 0);
+
+  // Foliage layers
+  const foliage1 = new THREE.ConeGeometry(3.5, 6, 7);
+  foliage1.translate(0, 7, 0);
+
+  const foliage2 = new THREE.ConeGeometry(2.8, 5, 7);
+  foliage2.translate(0, 10, 0);
+
+  const foliage3 = new THREE.ConeGeometry(1.8, 4, 7);
+  foliage3.translate(0, 12.5, 0);
+
+  return { trunk, foliage1, foliage2, foliage3 };
+}
+
+function placeTrees() {
+  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x5C3A1E, roughness: 0.95 });
+
+  const foliageColors = [0x2D5A1E, 0x3A6B2A, 0x1E4A15, 0x2B6622, 0x3D7530];
+
+  const { trunk, foliage1, foliage2, foliage3 } = createTreeGeometry();
+
+  // Use instanced meshes for performance
+  const trunkInstanced = new THREE.InstancedMesh(trunk, trunkMat, TREE_COUNT);
+  trunkInstanced.castShadow = true;
+  trunkInstanced.receiveShadow = true;
+
+  const foliageMats = foliageColors.map(c =>
+    new THREE.MeshStandardMaterial({ color: c, roughness: 0.85, flatShading: true })
+  );
+
+  // We'll group foliage into separate instanced meshes per layer
+  const f1 = new THREE.InstancedMesh(foliage1, foliageMats[0], TREE_COUNT);
+  const f2 = new THREE.InstancedMesh(foliage2, foliageMats[1], TREE_COUNT);
+  const f3 = new THREE.InstancedMesh(foliage3, foliageMats[2], TREE_COUNT);
+  [f1, f2, f3].forEach(m => { m.castShadow = true; m.receiveShadow = true; });
+
+  const dummy = new THREE.Object3D();
+  const positions = [];
+
+  for (let i = 0; i < TREE_COUNT; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const radius = 20 + Math.random() * (TERRAIN_SIZE * 0.45);
+    const x = Math.cos(angle) * radius;
+    const z = Math.sin(angle) * radius;
+    const y = getTerrainHeight(x, z);
+
+    // Skip if on steep slopes or too high
+    if (y > 45) continue;
+
+    const scale = 0.7 + Math.random() * 0.8;
+    const rotY = Math.random() * Math.PI * 2;
+
+    dummy.position.set(x, y, z);
+    dummy.scale.set(scale, scale, scale);
+    dummy.rotation.set(0, rotY, 0);
+    dummy.updateMatrix();
+
+    trunkInstanced.setMatrix(i, dummy.matrix);
+    f1.setMatrix(i, dummy.matrix);
+    f2.setMatrix(i, dummy.matrix);
+    f3.setMatrix(i, dummy.matrix);
+
+    // Randomize foliage color per instance
+    const col = new THREE.Color(foliageColors[Math.floor(Math.random() * foliageColors.length)]);
+    f1.setColorAt(i, col);
+    f2.setColorAt(i, col.clone().offsetHSL(0, 0, 0.05));
+    f3.setColorAt(i, col.clone().offsetHSL(0.02, 0, 0.08));
+
+    positions.push({ x, y, z, scale });
+  }
+
+  scene.add(trunkInstanced, f1, f2, f3);
+  return positions;
+}
+
+const treePositions = placeTrees();
+
+// ── Grass patches (billboarded quads) ──────────────────────────────
+function createGrassPatches() {
+  const grassGeo = new THREE.PlaneGeometry(1.2, 1.8);
+  grassGeo.translate(0, 0.9, 0);
+
+  const grassMat = new THREE.MeshStandardMaterial({
+    color: 0x4A8530,
+    side: THREE.DoubleSide,
+    alphaTest: 0.5,
+    roughness: 0.9,
+  });
+
+  const grass = new THREE.InstancedMesh(grassGeo, grassMat, GRASS_PATCH_COUNT);
+  const dummy = new THREE.Object3D();
+
+  for (let i = 0; i < GRASS_PATCH_COUNT; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const radius = Math.random() * TERRAIN_SIZE * 0.48;
+    const x = Math.cos(angle) * radius;
+    const z = Math.sin(angle) * radius;
+    const y = getTerrainHeight(x, z);
+
+    dummy.position.set(x, y, z);
+    dummy.rotation.set(0, Math.random() * Math.PI, 0);
+    const s = 0.5 + Math.random() * 1.5;
+    dummy.scale.set(s, s + Math.random() * 0.5, s);
+    dummy.updateMatrix();
+    grass.setMatrix(i, dummy.matrix);
+
+    const green = new THREE.Color().setHSL(0.28 + Math.random() * 0.06, 0.5 + Math.random() * 0.3, 0.25 + Math.random() * 0.15);
+    grass.setColorAt(i, green);
+  }
+
+  grass.instanceColor.needsUpdate = true;
+  scene.add(grass);
+}
+
+createGrassPatches();
+
+// ── Clouds ─────────────────────────────────────────────────────────
+const clouds = [];
+
+function createCloud(x, y, z) {
+  const group = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0xFFFFFF,
+    roughness: 1,
+    metalness: 0,
+    transparent: true,
+    opacity: 0.85,
+    flatShading: true,
+  });
+
+  const count = 4 + Math.floor(Math.random() * 5);
+  for (let i = 0; i < count; i++) {
+    const r = 6 + Math.random() * 10;
+    const geo = new THREE.SphereGeometry(r, 7, 5);
+    const puff = new THREE.Mesh(geo, mat);
+    puff.position.set(
+      (Math.random() - 0.5) * 25,
+      (Math.random() - 0.5) * 4,
+      (Math.random() - 0.5) * 15
+    );
+    puff.scale.y = 0.5 + Math.random() * 0.3;
+    group.add(puff);
+  }
+
+  group.position.set(x, y, z);
+  group.userData.speed = 1.5 + Math.random() * 3;
+  scene.add(group);
+  clouds.push(group);
+}
+
+for (let i = 0; i < CLOUD_COUNT; i++) {
+  createCloud(
+    (Math.random() - 0.5) * 1800,
+    150 + Math.random() * 100,
+    (Math.random() - 0.5) * 1800
+  );
+}
+
+// ── Rocks ──────────────────────────────────────────────────────────
+function placeRocks() {
+  const rockGeo = new THREE.DodecahedronGeometry(1, 1);
+  const rockMat = new THREE.MeshStandardMaterial({
+    color: 0x777769,
+    roughness: 0.95,
+    flatShading: true,
+  });
+
+  const rockCount = 200;
+  const rocks = new THREE.InstancedMesh(rockGeo, rockMat, rockCount);
+  rocks.castShadow = true;
+  rocks.receiveShadow = true;
+  const dummy = new THREE.Object3D();
+
+  for (let i = 0; i < rockCount; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const radius = 10 + Math.random() * TERRAIN_SIZE * 0.45;
+    const x = Math.cos(angle) * radius;
+    const z = Math.sin(angle) * radius;
+    const y = getTerrainHeight(x, z);
+
+    const s = 0.5 + Math.random() * 2.5;
+    dummy.position.set(x, y - s * 0.2, z);
+    dummy.scale.set(s * (0.8 + Math.random() * 0.4), s * (0.5 + Math.random() * 0.5), s * (0.8 + Math.random() * 0.4));
+    dummy.rotation.set(Math.random() * 0.4, Math.random() * Math.PI * 2, Math.random() * 0.3);
+    dummy.updateMatrix();
+    rocks.setMatrix(i, dummy.matrix);
+
+    const col = new THREE.Color().setHSL(0.1, 0.05 + Math.random() * 0.08, 0.35 + Math.random() * 0.15);
+    rocks.setColorAt(i, col);
+  }
+
+  rocks.instanceColor.needsUpdate = true;
+  scene.add(rocks);
+}
+
+placeRocks();
+
+// ── Flowers ────────────────────────────────────────────────────────
+function placeFlowers() {
+  const flowerGeo = new THREE.SphereGeometry(0.3, 5, 4);
+  const flowerCount = 1500;
+  const flowerMat = new THREE.MeshStandardMaterial({ roughness: 0.7 });
+  const flowers = new THREE.InstancedMesh(flowerGeo, flowerMat, flowerCount);
+  const dummy = new THREE.Object3D();
+
+  const flowerColors = [0xE84393, 0xFDCB6E, 0xE17055, 0x6C5CE7, 0xFAB1A0, 0xFF7675, 0xFFFFFF];
+
+  for (let i = 0; i < flowerCount; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const radius = Math.random() * TERRAIN_SIZE * 0.45;
+    const x = Math.cos(angle) * radius;
+    const z = Math.sin(angle) * radius;
+    const y = getTerrainHeight(x, z);
+
+    if (y > 35 || y < -15) continue;
+
+    dummy.position.set(x, y + 0.5 + Math.random() * 0.3, z);
+    const s = 0.4 + Math.random() * 0.8;
+    dummy.scale.set(s, s * (0.6 + Math.random() * 0.8), s);
+    dummy.updateMatrix();
+    flowers.setMatrix(i, dummy.matrix);
+    flowers.setColorAt(i, new THREE.Color(flowerColors[Math.floor(Math.random() * flowerColors.length)]));
+  }
+
+  flowers.instanceColor.needsUpdate = true;
+  scene.add(flowers);
+}
+
+placeFlowers();
+
+// ── NPCs ──────────────────────────────────────────────────────────
+const NPC_DIST = 5, npcs = [], npcDefs = [
+  { name:'Elara', color:0xE84393, msgs:['The sunset from the hilltop is breathtaking.','Have you seen the flowers by the valley?','I come here to think. It\'s peaceful.'] },
+  { name:'Finn', color:0x0984E3, msgs:['Watch your step on the slopes!','I\'ve been mapping these hills for years.','There\'s a great view to the north.'] },
+  { name:'Sage', color:0x6C5CE7, msgs:['The wind carries stories, if you listen.','Every rock here has a history.','I wonder what lies beyond the fog.'] },
+  { name:'Rowan', color:0x00B894, msgs:['These trees have been here for centuries.','I planted a garden just over that ridge.','Nature always finds a way.'] },
+  { name:'Mira', color:0xFDCB6E, msgs:['Hello, traveler! Beautiful day, isn\'t it?','I love how the light changes here.','Have you explored the eastern hills yet?'] },
+];
+const npcDialog = document.getElementById('npc-dialog');
+const dialogName = document.getElementById('dialog-name');
+const dialogMsg = document.getElementById('dialog-msg');
+const interactHint = document.getElementById('interact-hint');
+let dialogOpen = false, nearestNPC = null;
+
+document.getElementById('dialog-close').addEventListener('click', () => {
+  npcDialog.style.display = 'none'; dialogOpen = false;
+  if (!inVR) renderer.domElement.requestPointerLock();
+});
+
+function makeNameSprite(name) {
+  const c = document.createElement('canvas'); c.width = 256; c.height = 64;
+  const x = c.getContext('2d'); x.font = 'bold 28px Segoe UI, sans-serif';
+  x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.fillStyle = 'rgba(0,0,0,0.5)'; x.fillText(name, 129, 33);
+  x.fillStyle = '#fff'; x.fillText(name, 128, 32);
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthTest: false }));
+  s.scale.set(4, 1, 1); return s;
+}
+
+for (let i = 0; i < npcDefs.length; i++) {
+  const d = npcDefs[i], g = new THREE.Group();
+  const bMat = new THREE.MeshStandardMaterial({ color: d.color, roughness: 0.7 });
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.45, 1.2, 4, 8), bMat);
+  body.position.y = 1.05; body.castShadow = true; g.add(body);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.35, 8, 6), new THREE.MeshStandardMaterial({ color: 0xFFDBAC, roughness: 0.6 }));
+  head.position.y = 2.1; head.castShadow = true; g.add(head);
+  const aGeo = new THREE.BoxGeometry(0.2, 0.8, 0.2);
+  const la = new THREE.Mesh(aGeo, bMat.clone()); la.position.set(-0.65, 1.2, 0); la.castShadow = true;
+  const ra = new THREE.Mesh(aGeo, bMat.clone()); ra.position.set(0.65, 1.2, 0); ra.castShadow = true;
+  g.add(la, ra);
+  const label = makeNameSprite(d.name); label.position.y = 3.0; g.add(label);
+  const ang = (i / npcDefs.length) * Math.PI * 2 + 0.3, rad = 30 + Math.random() * 150;
+  const px = Math.cos(ang) * rad, pz = Math.sin(ang) * rad;
+  g.position.set(px, getTerrainHeight(px, pz), pz);
+  scene.add(g);
+  npcs.push({ group: g, bodyMat: bMat, def: d, msgIdx: 0,
+    walkDir: new THREE.Vector3(Math.random()-0.5, 0, Math.random()-0.5).normalize(),
+    walkTimer: 3 + Math.random() * 2, pauseTimer: 0, isWalking: true, highlighted: false });
+}
+
+function openNPCDialog(npc) {
+  dialogOpen = true;
+  dialogName.textContent = npc.def.name;
+  dialogMsg.textContent = npc.def.msgs[npc.msgIdx++ % npc.def.msgs.length];
+  npcDialog.style.display = 'flex';
+  if (!inVR) document.exitPointerLock();
+}
+
+function updateNPCs(dt) {
+  const pp = inVR ? cameraRig.position : camera.position;
+  nearestNPC = null; let nearD = Infinity;
+  for (const n of npcs) {
+    const p = n.group.position;
+    if (n.isWalking) {
+      p.x += n.walkDir.x * 2.5 * dt; p.z += n.walkDir.z * 2.5 * dt;
+      p.y = getTerrainHeight(p.x, p.z);
+      if ((n.walkTimer -= dt) <= 0) { n.isWalking = false; n.pauseTimer = 1.5 + Math.random() * 2; }
+    } else if ((n.pauseTimer -= dt) <= 0) {
+      n.isWalking = true; n.walkTimer = 3 + Math.random() * 2;
+      n.walkDir.set(Math.random()-0.5, 0, Math.random()-0.5).normalize();
+    }
+    const dx = pp.x - p.x, dz = pp.z - p.z, dist = Math.sqrt(dx*dx + dz*dz);
+    if (dist < NPC_DIST) { n.group.rotation.y = Math.atan2(dx, dz); n.isWalking = false; }
+    const glow = dist < NPC_DIST;
+    if (glow !== n.highlighted) {
+      n.highlighted = glow;
+      n.bodyMat.emissive.copy(glow ? new THREE.Color(n.def.color).multiplyScalar(0.35) : new THREE.Color(0));
+    }
+    if (dist < nearD && dist < NPC_DIST) { nearD = dist; nearestNPC = n; }
+  }
+  interactHint.style.display = (nearestNPC && !dialogOpen) ? 'block' : 'none';
+}
+
+// ── Player / Controls ──────────────────────────────────────────────
+const blocker = document.getElementById('blocker');
+const hudPos = document.getElementById('hud-pos');
+const hudDir = document.getElementById('hud-dir');
+const hudAlt = document.getElementById('hud-alt');
+
+let isLocked = false;
+let pitch = 0, yaw = 0;
+
+const keys = {};
+const velocity = new THREE.Vector3();
+const direction = new THREE.Vector3();
+const euler = new THREE.Euler(0, 0, 0, 'YXZ');
+
+// Pointer lock
+renderer.domElement.addEventListener('click', () => {
+  renderer.domElement.requestPointerLock();
+});
+
+document.addEventListener('pointerlockchange', () => {
+  isLocked = document.pointerLockElement === renderer.domElement;
+  blocker.style.display = isLocked ? 'none' : 'flex';
+});
+
+document.addEventListener('mousemove', (e) => {
+  if (!isLocked) return;
+  yaw -= e.movementX * MOUSE_SENSITIVITY;
+  pitch -= e.movementY * MOUSE_SENSITIVITY;
+  pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, pitch));
+});
+
+document.addEventListener('keydown', (e) => {
+  keys[e.code] = true;
+  if (e.code === 'KeyE' && nearestNPC && !dialogOpen) openNPCDialog(nearestNPC);
+});
+document.addEventListener('keyup', (e) => { keys[e.code] = false; });
+
+// Initialize VR (async check, button setup)
+initVR();
+
+// ── Animation loop ─────────────────────────────────────────────────
+const clock = new THREE.Clock();
+let prevTerrainY = getTerrainHeight(0, 0);
+
+function getCardinal(yaw) {
+  const deg = ((THREE.MathUtils.radToDeg(yaw) % 360) + 360) % 360;
+  const dirs = ['N', 'NW', 'W', 'SW', 'S', 'SE', 'E', 'NE'];
+  return dirs[Math.round(deg / 45) % 8];
+}
+
+function animate() {
+  const dt = Math.min(clock.getDelta(), 0.1);
+
+  if (inVR) {
+    // ── VR locomotion ──
+    // Left thumbstick: walk/strafe relative to head direction
+    const [lx, lz] = getVRThumbstickAxes('left');
+    if (Math.abs(lx) > 0.1 || Math.abs(lz) > 0.1) {
+      // Get head forward direction projected onto XZ plane
+      const headQuat = new THREE.Quaternion();
+      const xrCamera = renderer.xr.getCamera();
+      xrCamera.getWorldQuaternion(headQuat);
+      const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(headQuat);
+      forward.y = 0; forward.normalize();
+      const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0,1,0)).normalize();
+
+      const moveVec = new THREE.Vector3();
+      moveVec.addScaledVector(right, lx * WALK_SPEED * dt);
+      moveVec.addScaledVector(forward, -lz * WALK_SPEED * dt);
+      cameraRig.position.add(moveVec);
+    }
+
+    // Right thumbstick: snap turn (X axis)
+    const [rx] = getVRThumbstickAxes('right');
+    vrTurnCooldown = Math.max(0, vrTurnCooldown - dt);
+    if (Math.abs(rx) > 0.6 && vrTurnCooldown <= 0) {
+      cameraRig.rotation.y -= Math.sign(rx) * Math.PI / 6; // 30-degree snap
+      vrTurnCooldown = 0.3;
+    }
+
+    // Clamp rig to terrain bounds
+    const halfVR = TERRAIN_SIZE * 0.49;
+    cameraRig.position.x = THREE.MathUtils.clamp(cameraRig.position.x, -halfVR, halfVR);
+    cameraRig.position.z = THREE.MathUtils.clamp(cameraRig.position.z, -halfVR, halfVR);
+
+    // Ground following for VR rig
+    const vrTerrainY = getTerrainHeight(cameraRig.position.x, cameraRig.position.z);
+    cameraRig.position.y = THREE.MathUtils.lerp(cameraRig.position.y, vrTerrainY, 1 - Math.pow(0.001, dt));
+
+    // Move shadow camera with VR player
+    sunLight.position.set(cameraRig.position.x + 300, 400, cameraRig.position.z + 200);
+    sunLight.target.position.set(cameraRig.position.x, cameraRig.position.y, cameraRig.position.z);
+
+    // VR A-button (button 4) on right controller to interact with NPC
+    const session = renderer.xr.getSession();
+    if (session) {
+      for (const source of session.inputSources) {
+        if (source.handedness === 'right' && source.gamepad && source.gamepad.buttons[4]) {
+          if (source.gamepad.buttons[4].pressed && nearestNPC && !dialogOpen) openNPCDialog(nearestNPC);
+        }
+      }
+    }
+  } else if (isLocked) {
+    // ── Desktop locomotion ──
+    const speed = keys['ShiftLeft'] || keys['ShiftRight'] ? RUN_SPEED : WALK_SPEED;
+
+    direction.set(0, 0, 0);
+    if (keys['KeyW'] || keys['ArrowUp'])    direction.z -= 1;
+    if (keys['KeyS'] || keys['ArrowDown'])  direction.z += 1;
+    if (keys['KeyA'] || keys['ArrowLeft'])  direction.x -= 1;
+    if (keys['KeyD'] || keys['ArrowRight']) direction.x += 1;
+
+    if (direction.length() > 0) {
+      direction.normalize();
+      const sin = Math.sin(yaw);
+      const cos = Math.cos(yaw);
+      const dx = direction.x * cos - direction.z * sin;
+      const dz = direction.x * sin + direction.z * cos;
+      velocity.x = dx * speed;
+      velocity.z = dz * speed;
+    } else {
+      velocity.x *= 0.85;
+      velocity.z *= 0.85;
+    }
+
+    camera.position.x += velocity.x * dt;
+    camera.position.z += velocity.z * dt;
+
+    const halfSize = TERRAIN_SIZE * 0.49;
+    camera.position.x = THREE.MathUtils.clamp(camera.position.x, -halfSize, halfSize);
+    camera.position.z = THREE.MathUtils.clamp(camera.position.z, -halfSize, halfSize);
+
+    const terrainY = getTerrainHeight(camera.position.x, camera.position.z);
+    const targetY = terrainY + PLAYER_HEIGHT;
+    prevTerrainY = THREE.MathUtils.lerp(prevTerrainY, targetY, 1 - Math.pow(0.001, dt));
+    camera.position.y = prevTerrainY;
+
+    euler.set(pitch, yaw, 0);
+    camera.quaternion.setFromEuler(euler);
+
+    sunLight.position.set(camera.position.x + 300, 400, camera.position.z + 200);
+    sunLight.target.position.set(camera.position.x, camera.position.y, camera.position.z);
+
+    hudPos.textContent = `${camera.position.x.toFixed(0)}, ${camera.position.z.toFixed(0)}`;
+    hudDir.textContent = getCardinal(yaw);
+    hudAlt.textContent = (camera.position.y - PLAYER_HEIGHT).toFixed(1);
+  }
+
+  // Update NPCs
+  updateNPCs(dt);
+
+  // Animate clouds
+  for (const cloud of clouds) {
+    cloud.position.x += cloud.userData.speed * dt;
+    if (cloud.position.x > 1000) cloud.position.x = -1000;
+  }
+
+  renderer.render(scene, camera);
+}
+
+// ── Resize handler ─────────────────────────────────────────────────
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// ── Start ──────────────────────────────────────────────────────────
+// Set initial position
+const startY = getTerrainHeight(0, 0) + PLAYER_HEIGHT;
+camera.position.set(0, startY, 0);
+prevTerrainY = startY;
+
+renderer.setAnimationLoop(animate);
+</script>
+</body>
+</html>
