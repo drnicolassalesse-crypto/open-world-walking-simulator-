@@ -307,7 +307,7 @@
 <div id="achieve-banner"></div>
 <div id="zoom-vignette"></div><div id="zoom-hud"></div>
 <div id="photo-overlay"></div><div id="photo-label">PHOTO MODE — Press P to exit</div>
-<div id="stats-hud"><span class="stat-label">SEASON</span><span id="stat-season">☀️ Summer</span><br><span class="stat-label">CLOCK</span><span id="stat-time">12:00</span><br><span class="stat-label">WEATHER</span><span id="stat-weather">Clear</span></div>
+<div id="stats-hud"><span class="stat-label">SEASON</span><span id="stat-season">☀️ Summer</span><br><span class="stat-label">CLOCK</span><span id="stat-time">12:00</span><br><span class="stat-label">WEATHER</span><span id="stat-weather">Clear</span><br><span class="stat-label">BIOME</span><span id="stat-biome">Meadow</span></div>
 <div id="quest-log"><h3>Quest Log</h3><div id="quest-list"></div></div>
 
 <script type="importmap">
@@ -835,8 +835,12 @@ function generateTerrain() {
       b = THREE.MathUtils.lerp(b, 0.22, s);
     }
 
+    // Biome tinting
+    const bx = verts.getX(i), bz = verts.getZ(i);
+    if (bz < -50) { r *= 0.7; g *= 0.85; b *= 0.6; } // Forest: darker green
+    else if (bz > 50) { r += 0.08; g += 0.05; b -= 0.03; } // Plains: lighter yellow
     // Subtle noise variation
-    const nv = fbm(verts.getX(i) * 0.05, verts.getZ(i) * 0.05, 2, 2, 0.5) * 0.06;
+    const nv = fbm(bx * 0.05, bz * 0.05, 2, 2, 0.5) * 0.06;
     colors[i * 3]     = Math.max(0, Math.min(1, r + nv));
     colors[i * 3 + 1] = Math.max(0, Math.min(1, g + nv));
     colors[i * 3 + 2] = Math.max(0, Math.min(1, b + nv * 0.5));
@@ -2636,6 +2640,8 @@ function animate() {
     document.getElementById('stat-season').textContent = `${seasonIcons[currentSeason]||'☀️'} ${currentSeason.charAt(0).toUpperCase()+currentSeason.slice(1)}`;
     document.getElementById('stat-time').textContent = timeStr;
     document.getElementById('stat-weather').textContent = currentSeason==='winter'&&snowActive ? 'Snowing' : weather==='rain' ? 'Raining' : 'Clear';
+    const pz = camera.position.z;
+    document.getElementById('stat-biome').textContent = pz < -50 ? '🌲 Forest' : pz > 50 ? '🌾 Plains' : '🌿 Meadow';
   }
 
   // Weather
