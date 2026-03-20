@@ -1160,6 +1160,34 @@ function updateBirds(elapsed) {
   }
 }
 
+// ── Stone Bridge ────────────────────────────────────────────────
+{
+  const by = getTerrainHeight(0, -60);
+  const stoneMat = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.9, flatShading: true });
+  // Roadway
+  const road = new THREE.Mesh(new THREE.PlaneGeometry(3, 20), stoneMat);
+  road.rotation.x = -Math.PI / 2; road.position.set(0, by + 0.5, -60);
+  road.receiveShadow = true; scene.add(road);
+  // Railings
+  const railGeo = new THREE.BoxGeometry(0.2, 1, 20);
+  const r1 = new THREE.Mesh(railGeo, stoneMat); r1.position.set(-1.5, by + 1, -60); r1.castShadow = true; scene.add(r1);
+  const r2 = new THREE.Mesh(railGeo, stoneMat); r2.position.set(1.5, by + 1, -60); r2.castShadow = true; scene.add(r2);
+  // Arch supports (half-torus under bridge at 4 points)
+  const archMat = new THREE.MeshStandardMaterial({ color: 0x777777, roughness: 0.95, flatShading: true });
+  const archGeo = new THREE.TorusGeometry(1.2, 0.25, 6, 8, Math.PI);
+  for (const zo of [-55, -50, -65, -70]) {
+    const arch = new THREE.Mesh(archGeo, archMat);
+    arch.position.set(0, by - 0.7, zo); arch.rotation.x = Math.PI; arch.castShadow = true; scene.add(arch);
+  }
+  // Sign post
+  const postGeo = new THREE.BoxGeometry(0.15, 2.5, 0.15);
+  const post = new THREE.Mesh(postGeo, new THREE.MeshStandardMaterial({ color: 0x6B4226, roughness: 0.9 }));
+  post.position.set(2.5, by + 1.25, -50); post.castShadow = true; scene.add(post);
+  const sign = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.6, 0.08),
+    new THREE.MeshStandardMaterial({ color: 0x999988, roughness: 0.85 }));
+  sign.position.set(2.5, by + 2.3, -50); sign.castShadow = true; scene.add(sign);
+}
+
 // ── Torches ─────────────────────────────────────────────────────
 const torches = [];
 {
