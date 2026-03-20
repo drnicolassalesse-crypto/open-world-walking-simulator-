@@ -195,6 +195,21 @@
     border: 1px solid rgba(255,255,255,0.12); border-radius: 10px;
     padding: 12px 24px; display: none;
   }
+  #quest-log {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    z-index: 350; display: none; background: rgba(0,0,0,0.75); backdrop-filter: blur(10px);
+    border: 1px solid rgba(255,255,255,0.15); border-radius: 14px;
+    padding: 24px 28px; color: #fff; min-width: 320px;
+  }
+  #quest-log h3 { font-size: 16px; font-weight: 300; letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 14px; text-align: center; }
+  .quest-item { margin-bottom: 10px; }
+  .quest-name { font-size: 13px; font-weight: bold; }
+  .quest-desc { font-size: 11px; color: rgba(255,255,255,0.5); }
+  .quest-bar { height: 5px; background: rgba(255,255,255,0.1); border-radius: 3px; margin-top: 3px; overflow: hidden; }
+  .quest-bar-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
+  .quest-status { font-size: 10px; float: right; }
+  .quest-status.active { color: #4CAF50; }
+  .quest-status.complete { color: #FFD700; }
 </style>
 </head>
 <body>
@@ -223,7 +238,8 @@
   <span class="label">GEMS</span> <span id="hud-gems">0 / 15</span><br>
   <span class="label">SKY</span> <span id="hud-weather">☀️ Clear</span><br>
   <span class="label">DEER</span> <span id="hud-deer">0 scared</span><br>
-  <span class="label">FISH</span> <span id="hud-fish">0 caught</span>
+  <span class="label">FISH</span> <span id="hud-fish">0 caught</span><br>
+  <span class="label">SND</span> <span id="hud-sound">ON</span>
   <div id="stamina-bar"><div id="stamina-fill" style="background:#4CAF50"></div></div>
 </div>
 
@@ -253,6 +269,7 @@
 <div id="interact-hint">Press <kbd style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);border-radius:3px;padding:1px 6px">E</kbd> to talk</div>
 <div id="inventory-panel"><h3>Inventory</h3><div id="inv-grid"></div></div>
 <div id="fish-status"></div>
+<div id="quest-log"><h3>Quest Log</h3><div id="quest-list"></div></div>
 
 <script type="importmap">
 {
@@ -303,6 +320,8 @@ cameraRig.add(new THREE.PerspectiveCamera()); // placeholder, replaced below
 const controllerModelFactory = new XRControllerModelFactory();
 let controller0, controller1, grip0, grip1;
 let vrTurnCooldown = 0;
+let vrSmoothMove = false; // false=teleport-style snap, true=smooth locomotion
+let vrSettingsVisible = false;
 
 function setupVRControllers() {
   controller0 = renderer.xr.getController(0);
@@ -320,6 +339,41 @@ function setupVRControllers() {
   const lineMat = new THREE.LineBasicMaterial({ color: 0x4488ff, transparent: true, opacity: 0.5 });
   controller0.add(new THREE.Line(lineGeo.clone(), lineMat.clone()));
   controller1.add(new THREE.Line(lineGeo.clone(), lineMat.clone()));
+}
+
+// VR Settings panel (3D floating)
+const vrSettingsGroup = new THREE.Group();
+vrSettingsGroup.visible = false;
+{
+  const bgMat = new THREE.MeshBasicMaterial({ color: 0x222233, transparent: true, opacity: 0.85, side: THREE.DoubleSide });
+  const bg = new THREE.Mesh(new THREE.PlaneGeometry(0.6, 0.3), bgMat);
+  vrSettingsGroup.add(bg);
+  // Gear icon (small box as indicator)
+  const gear = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.01),
+    new THREE.MeshBasicMaterial({ color: 0xffffff }));
+  gear.position.set(-0.22, 0.1, 0.01); vrSettingsGroup.add(gear);
+  // Label canvas
+  const lc = document.createElement('canvas'); lc.width = 256; lc.height = 128;
+  const lx = lc.getContext('2d'); lx.fillStyle = '#fff'; lx.font = '20px sans-serif';
+  lx.fillText('VR Locomotion', 20, 30); lx.font = '16px sans-serif';
+  lx.fillText('Mode: Snap Turn', 20, 70);
+  const labelTex = new THREE.CanvasTexture(lc);
+  const labelMesh = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.25),
+    new THREE.MeshBasicMaterial({ map: labelTex, transparent: true, side: THREE.DoubleSide }));
+  labelMesh.position.z = 0.01; vrSettingsGroup.add(labelMesh);
+  vrSettingsGroup.userData = { canvas: lc, ctx: lx, tex: labelTex, label: labelMesh };
+}
+cameraRig.add(vrSettingsGroup);
+
+function updateVRSettingsLabel() {
+  const { ctx: lx, canvas: lc, tex } = vrSettingsGroup.userData;
+  lx.clearRect(0, 0, 256, 128);
+  lx.fillStyle = '#fff'; lx.font = '20px sans-serif';
+  lx.fillText('VR Locomotion', 20, 30); lx.font = '16px sans-serif';
+  lx.fillText(`Mode: ${vrSmoothMove ? 'Smooth Move' : 'Snap Turn'}`, 20, 70);
+  lx.fillStyle = '#aaa'; lx.font = '13px sans-serif';
+  lx.fillText('Press Y to toggle', 20, 100);
+  tex.needsUpdate = true;
 }
 
 async function initVR() {
@@ -1455,6 +1509,37 @@ function toggleInventory() {
 }
 renderInventory();
 
+// ── Quest Log ────────────────────────────────────────────────────
+let questLogOpen = false;
+const questLogPanel = document.getElementById('quest-log');
+const questList = document.getElementById('quest-list');
+
+function getQuests() {
+  const specialGemCollected = gems.length > 0 && gems[gems.length - 1].collected;
+  return [
+    { name: 'Gem Hunter', desc: 'Collect all 15 gems', cur: gemsCollected, max: 15, done: gemsCollected >= 15 },
+    { name: 'The Special One', desc: 'Find the floating island gem', cur: specialGemCollected ? 1 : 0, max: 1, done: specialGemCollected },
+    { name: 'Treasure Hunter', desc: 'Open the treasure chest', cur: chestOpened ? 1 : 0, max: 1, done: chestOpened },
+    { name: 'Master Angler', desc: 'Catch 3 fish', cur: Math.min(fishCaught, 3), max: 3, done: fishCaught >= 3 },
+  ];
+}
+
+function renderQuestLog() {
+  questList.innerHTML = '';
+  for (const q of getQuests()) {
+    const pct = Math.min(100, (q.cur / q.max) * 100);
+    const status = q.done ? 'complete' : 'active';
+    questList.innerHTML += `<div class="quest-item"><span class="quest-name">${q.name}</span><span class="quest-status ${status}">${q.done ? 'Complete' : 'Active'}</span><div class="quest-desc">${q.desc} (${q.cur}/${q.max})</div><div class="quest-bar"><div class="quest-bar-fill" style="width:${pct}%;background:${q.done ? '#FFD700' : '#4CAF50'}"></div></div></div>`;
+  }
+}
+
+function toggleQuestLog() {
+  questLogOpen = !questLogOpen;
+  questLogPanel.style.display = questLogOpen ? 'block' : 'none';
+  if (questLogOpen) { renderQuestLog(); if (!inVR) document.exitPointerLock(); }
+  else if (!inVR) renderer.domElement.requestPointerLock();
+}
+
 // ── NPCs ──────────────────────────────────────────────────────────
 const NPC_DIST = 5, npcs = [], npcDefs = [
   { name:'Elara', color:0xE84393, msgs:['The sunset from the hilltop is breathtaking.','Have you seen the flowers by the valley?','I come here to think. It\'s peaceful.'], hint:'Gems glow brighter at dawn — check the eastern ridge.', lore:'This valley was once a lake, thousands of years ago.' },
@@ -1655,6 +1740,9 @@ document.getElementById('pause-reset').addEventListener('click', () => {
 
 document.addEventListener('keydown', (e) => {
   if (e.code === 'KeyI') { toggleInventory(); return; }
+  if (e.code === 'KeyQ') { toggleQuestLog(); return; }
+  if (e.code === 'KeyM') { toggleMute(); return; }
+  if (e.code === 'Escape' && questLogOpen) { toggleQuestLog(); return; }
   if (e.code === 'Escape' && inventoryOpen) { toggleInventory(); return; }
   if (e.code === 'Escape' && dialogOpen) { closeDialog(); return; }
   if (e.code === 'Escape' && !dialogOpen) { e.preventDefault(); togglePause(); return; }
@@ -1673,6 +1761,50 @@ document.addEventListener('keyup', (e) => { keys[e.code] = false; });
 
 // Initialize VR (async check, button setup)
 initVR();
+
+// ── Ambient Soundtrack ──────────────────────────────────────────
+let audioCtx = null, audioMuted = false, audioStarted = false;
+let dayOsc, nightOsc, forestOsc, dayGain, nightGain, forestGain, masterGain;
+
+function initAudio() {
+  if (audioStarted) return;
+  audioStarted = true;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  masterGain = audioCtx.createGain(); masterGain.gain.value = 1; masterGain.connect(audioCtx.destination);
+  // Day drone: 432Hz sine
+  dayOsc = audioCtx.createOscillator(); dayOsc.type = 'sine'; dayOsc.frequency.value = 432;
+  dayGain = audioCtx.createGain(); dayGain.gain.value = 0; dayOsc.connect(dayGain); dayGain.connect(masterGain); dayOsc.start();
+  // Night drone: 220Hz sine
+  nightOsc = audioCtx.createOscillator(); nightOsc.type = 'sine'; nightOsc.frequency.value = 220;
+  nightGain = audioCtx.createGain(); nightGain.gain.value = 0; nightOsc.connect(nightGain); nightGain.connect(masterGain); nightOsc.start();
+  // Forest drone: 528Hz triangle
+  forestOsc = audioCtx.createOscillator(); forestOsc.type = 'triangle'; forestOsc.frequency.value = 528;
+  forestGain = audioCtx.createGain(); forestGain.gain.value = 0; forestOsc.connect(forestGain); forestGain.connect(masterGain); forestOsc.start();
+}
+
+function updateAudio(dt) {
+  if (!audioStarted || audioMuted) return;
+  const pp = inVR ? cameraRig.position : camera.position;
+  // Day/night crossfade based on timeOfDay
+  const sunAngle = (timeOfDay - 0.25) * Math.PI * 2;
+  const dayFactor = THREE.MathUtils.clamp(Math.sin(sunAngle) * 3, 0, 1);
+  dayGain.gain.value += (dayFactor * 0.02 - dayGain.gain.value) * 2 * dt;
+  nightGain.gain.value += ((1 - dayFactor) * 0.02 - nightGain.gain.value) * 2 * dt;
+  // Forest zone: x in [-60,-10], z in [-60,10]
+  const inForest = pp.x > -60 && pp.x < -10 && pp.z > -60 && pp.z < 10;
+  forestGain.gain.value += ((inForest ? 0.015 : 0) - forestGain.gain.value) * 2 * dt;
+}
+
+function toggleMute() {
+  audioMuted = !audioMuted;
+  if (audioStarted) masterGain.gain.value = audioMuted ? 0 : 1;
+  document.getElementById('hud-sound').textContent = audioMuted ? 'OFF' : 'ON';
+}
+
+// Start audio on first interaction
+const startAudioOnce = () => { initAudio(); document.removeEventListener('click', startAudioOnce); document.removeEventListener('keydown', startAudioOnce); };
+document.addEventListener('click', startAudioOnce);
+document.addEventListener('keydown', startAudioOnce);
 
 // ── Animation loop ─────────────────────────────────────────────────
 const clock = new THREE.Clock();
@@ -1710,11 +1842,13 @@ function animate() {
       cameraRig.position.add(moveVec);
     }
 
-    // Right thumbstick: snap turn (X axis)
+    // Right thumbstick: turn
     const [rx] = getVRThumbstickAxes('right');
     vrTurnCooldown = Math.max(0, vrTurnCooldown - dt);
-    if (Math.abs(rx) > 0.6 && vrTurnCooldown <= 0) {
-      cameraRig.rotation.y -= Math.sign(rx) * Math.PI / 6; // 30-degree snap
+    if (vrSmoothMove) {
+      if (Math.abs(rx) > 0.15) cameraRig.rotation.y -= rx * 1.5 * dt;
+    } else if (Math.abs(rx) > 0.6 && vrTurnCooldown <= 0) {
+      cameraRig.rotation.y -= Math.sign(rx) * Math.PI / 4; // 45-degree snap
       vrTurnCooldown = 0.3;
     }
 
@@ -1729,13 +1863,23 @@ function animate() {
     cameraRig.position.y += velocityY * dt;
     if (cameraRig.position.y <= vrTerrainY) { cameraRig.position.y = vrTerrainY; velocityY = 0; onGround = true; }
 
-    // VR A-button (button 4) on right controller to interact with NPC
+    // VR buttons
     const session = renderer.xr.getSession();
     if (session) {
       for (const source of session.inputSources) {
-        if (source.handedness === 'right' && source.gamepad && source.gamepad.buttons[4]) {
-          if (source.gamepad.buttons[4].pressed && nearestNPC && !dialogOpen) openNPCDialog(nearestNPC);
-          if (source.gamepad.buttons[5] && source.gamepad.buttons[5].pressed && onGround) { velocityY = 8; onGround = false; }
+        if (source.handedness === 'right' && source.gamepad) {
+          const btns = source.gamepad.buttons;
+          if (btns[4] && btns[4].pressed && nearestNPC && !dialogOpen) openNPCDialog(nearestNPC);
+          if (btns[5] && btns[5].pressed && onGround) { velocityY = 8; onGround = false; }
+          // Y button (index 5 on left) or B button (index 5 on right) toggles VR settings
+        }
+        if (source.handedness === 'left' && source.gamepad && source.gamepad.buttons[5]) {
+          if (source.gamepad.buttons[5].pressed && vrTurnCooldown <= 0) {
+            vrSmoothMove = !vrSmoothMove; updateVRSettingsLabel();
+            vrSettingsGroup.visible = true; vrSettingsGroup.position.set(0, 1.4, -0.8);
+            setTimeout(() => { vrSettingsGroup.visible = false; }, 3000);
+            vrTurnCooldown = 0.5;
+          }
         }
       }
     }
@@ -1832,6 +1976,7 @@ function animate() {
   updateChest(dt);
   updateTorches();
   updateParticles(dt);
+  updateAudio(dt);
 
   // Animate water UV
   waterGeo.attributes.uv.array[0] += dt * 0.02; waterGeo.attributes.uv.array[2] += dt * 0.02;
