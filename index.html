@@ -225,6 +225,8 @@
   #achieve-panel h3 { font-size:16px;font-weight:300;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:12px;text-align:center;color:#FFD700; }
   .ach-row{margin-bottom:8px;} .ach-name{font-size:12px;font-weight:bold;} .ach-desc{font-size:10px;color:rgba(255,255,255,0.5);} .ach-bar{height:4px;background:rgba(255,255,255,0.1);border-radius:2px;margin-top:2px;overflow:hidden;} .ach-bar-fill{height:100%;border-radius:2px;} .ach-status{float:right;font-size:10px;}
   #achieve-banner{position:fixed;top:-50px;left:50%;transform:translateX(-50%);z-index:500;color:#FFD700;font-size:15px;font-weight:bold;background:rgba(0,0,0,0.7);backdrop-filter:blur(6px);border:1px solid rgba(255,215,0,0.4);border-radius:10px;padding:10px 24px;transition:top 0.5s ease;pointer-events:none;}
+  #zoom-vignette{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:40;display:none;background:radial-gradient(ellipse at center,transparent 50%,rgba(0,0,0,0.7) 85%,rgba(0,0,0,0.95) 100%);}
+  #zoom-hud{position:fixed;top:60px;right:20px;z-index:45;display:none;color:#fff;font-size:14px;background:rgba(0,0,0,0.4);padding:4px 10px;border-radius:6px;border:1px solid rgba(255,255,255,0.15);}
   #sign-tooltip {
     position: fixed; top: 25%; left: 50%; transform: translateX(-50%);
     z-index: 50; color: #fff; font-size: 14px;
@@ -289,7 +291,7 @@
 <div id="rain-overlay"></div>
 <div id="lightning-flash"></div>
 <div id="save-toast">Game saved</div>
-<div id="settings-panel"><button id="reset-save-btn">Reset Save</button></div>
+<div id="settings-panel"><button id="reset-save-btn">Reset Save</button><div style="margin-top:8px;font-size:11px;color:#ccc">Season:</div><div style="margin-top:4px;display:flex;gap:4px"><button class="season-btn" data-season="spring" onclick="setSeason('spring')">Spring</button><button class="season-btn" data-season="summer" onclick="setSeason('summer')">Summer</button><button class="season-btn" data-season="autumn" onclick="setSeason('autumn')">Autumn</button><button class="season-btn" data-season="winter" onclick="setSeason('winter')">Winter</button></div></div>
 <canvas id="minimap" width="150" height="150"></canvas>
 <div id="interact-hint">Press <kbd style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);border-radius:3px;padding:1px 6px">E</kbd> to talk</div>
 <div id="inventory-panel"><h3>Inventory</h3><div id="inv-grid"></div></div>
@@ -298,6 +300,7 @@
 <div id="sign-tooltip"></div>
 <div id="achieve-panel"><h3>Achievements</h3><div id="ach-list"></div></div>
 <div id="achieve-banner"></div>
+<div id="zoom-vignette"></div><div id="zoom-hud"></div>
 <div id="quest-log"><h3>Quest Log</h3><div id="quest-list"></div></div>
 
 <script type="importmap">
@@ -520,7 +523,7 @@ scene.add(sunMesh);
 
 // ── Day/Night Cycle ─────────────────────────────────────────────────
 let timeOfDay = 0.3; // 0-1, 0.3=morning, 0.5=noon, 0=midnight
-const DAY_DURATION = 300; // 5 minutes real time = 1 full day
+const DAY_DURATION = 7200; // 2 hours real time = 1 full day
 const moonLight = new THREE.PointLight(0x8888ff, 0, 500);
 moonLight.position.set(0, 300, 0);
 scene.add(moonLight);
@@ -557,13 +560,14 @@ function updateDayNight(dt, playerX, playerZ) {
   if (sunsetFactor > 0) skyColor.lerp(sunsetSky, sunsetFactor * 0.6);
   renderer.setClearColor(skyColor);
   scene.background.copy(skyColor);
-  scene.fog.color.copy(skyColor);
+  scene.fog.color.copy(skyColor).lerp(seasonFogTint[currentSeason], 0.15);
   // Ambient color temperature: warm day, orange sunset, cool night
   const warmAmbient = new THREE.Color(0xffd4a0);
   const coolAmbient = new THREE.Color(0x4466aa);
   const orangeAmbient = new THREE.Color(0xff8844);
   const ambColor = coolAmbient.clone().lerp(warmAmbient, dayFactor);
   if (sunsetFactor > 0) ambColor.lerp(orangeAmbient, sunsetFactor * 0.7);
+  ambColor.lerp(seasonAmbientTint[currentSeason], 0.2);
   ambientLight.color.copy(ambColor);
   ambientLight.intensity = 0.15 + dayFactor * 0.55;
   // Moon
@@ -830,26 +834,20 @@ function createTreeGeometry() {
   return { trunk, foliage1, foliage2, foliage3 };
 }
 
+let treeFoliageMeshes = [], grassInstMesh;
 function placeTrees() {
   const trunkMat = new THREE.MeshStandardMaterial({ color: 0x5C3A1E, roughness: 0.95 });
-
   const foliageColors = [0x2D5A1E, 0x3A6B2A, 0x1E4A15, 0x2B6622, 0x3D7530];
-
   const { trunk, foliage1, foliage2, foliage3 } = createTreeGeometry();
-
-  // Use instanced meshes for performance
   const trunkInstanced = new THREE.InstancedMesh(trunk, trunkMat, TREE_COUNT);
-  trunkInstanced.castShadow = true;
-  trunkInstanced.receiveShadow = true;
-
+  trunkInstanced.castShadow = true; trunkInstanced.receiveShadow = true;
   const foliageMats = foliageColors.map(c =>
     new THREE.MeshStandardMaterial({ color: c, roughness: 0.85, flatShading: true })
   );
-
-  // We'll group foliage into separate instanced meshes per layer
   const f1 = new THREE.InstancedMesh(foliage1, foliageMats[0], TREE_COUNT);
   const f2 = new THREE.InstancedMesh(foliage2, foliageMats[1], TREE_COUNT);
   const f3 = new THREE.InstancedMesh(foliage3, foliageMats[2], TREE_COUNT);
+  treeFoliageMeshes = [f1, f2, f3];
   [f1, f2, f3].forEach(m => { m.castShadow = true; m.receiveShadow = true; });
 
   const dummy = new THREE.Object3D();
@@ -928,6 +926,7 @@ function createGrassPatches() {
 
   grass.instanceColor.needsUpdate = true;
   scene.add(grass);
+  grassInstMesh = grass;
 }
 
 createGrassPatches();
@@ -1961,8 +1960,9 @@ document.addEventListener('pointerlockchange', () => {
 
 document.addEventListener('mousemove', (e) => {
   if (!isLocked || gamePaused) return;
-  yaw -= e.movementX * MOUSE_SENSITIVITY;
-  pitch -= e.movementY * MOUSE_SENSITIVITY;
+  const sens = MOUSE_SENSITIVITY * (zoomLevel > 0 ? 0.5 : 1);
+  yaw -= e.movementX * sens;
+  pitch -= e.movementY * sens;
   pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, pitch));
 });
 
@@ -2006,9 +2006,10 @@ document.addEventListener('keydown', (e) => {
   if (e.code === 'KeyE' && nearestNPC && !dialogOpen) openNPCDialog(nearestNPC);
   if (e.code === 'KeyF') tryFish();
   if (e.code === 'KeyN') toggleSnow();
+  if (e.code === 'KeyZ' && !zHeld) { zHeld=true; zoomLevel=3; targetFOV=ZOOM_FOVS[3]; }
   if (e.code === 'Space' && onGround) { velocityY = 8; onGround = false; }
 });
-document.addEventListener('keyup', (e) => { keys[e.code] = false; });
+document.addEventListener('keyup', (e) => { keys[e.code] = false; if (e.code==='KeyZ') { zHeld=false; zoomLevel=0; targetFOV=70; } });
 
 // Initialize VR (async check, button setup)
 initVR();
@@ -2149,6 +2150,104 @@ function toggleAchievements() {
   else if(!inVR)renderer.domElement.requestPointerLock();
 }
 
+// ── Season System ───────────────────────────────────────────────
+let currentSeason = localStorage.getItem('wandererSeason') || 'summer';
+const seasonFoliageColors = {
+  spring: [0x7ec850,0x8ed860,0x6eb840], summer: [0x2d5a1b,0x3a6b2a,0x1e4a15],
+  autumn: [0xe87830,0xcc3333,0xdaa520], winter: [0x5c3d1e,0x5c3d1e,0x5c3d1e]
+};
+const seasonGrassColors = { spring:0x8fbc45, summer:0x4a7c23, autumn:0xb8860b, winter:0xc8c8c8 };
+const seasonAmbientTint = { spring:new THREE.Color(0xffccdd), summer:new THREE.Color(0xffffff), autumn:new THREE.Color(0xffaa66), winter:new THREE.Color(0xaabbcc) };
+const seasonFogTint = { spring:new THREE.Color(0xffe0ee), summer:new THREE.Color(0xC8DFF0), autumn:new THREE.Color(0xddaa77), winter:new THREE.Color(0xbbccdd) };
+
+function setSeason(season) {
+  currentSeason = season;
+  localStorage.setItem('wandererSeason', season);
+  // Update foliage
+  const fc = seasonFoliageColors[season];
+  for (const fm of treeFoliageMeshes) {
+    if (!fm.instanceColor) continue;
+    const arr = fm.instanceColor.array;
+    for (let i = 0; i < TREE_COUNT; i++) {
+      const c = new THREE.Color(fc[season==='autumn'? Math.floor(Math.random()*3) : Math.floor(i%3)]);
+      arr[i*3]=c.r; arr[i*3+1]=c.g; arr[i*3+2]=c.b;
+    }
+    fm.instanceColor.needsUpdate = true;
+    fm.material.opacity = season==='winter'? 0.15 : 1.0;
+    fm.material.transparent = season==='winter';
+  }
+  // Update grass
+  if (grassInstMesh && grassInstMesh.instanceColor) {
+    const base = new THREE.Color(seasonGrassColors[season]);
+    const arr = grassInstMesh.instanceColor.array;
+    for (let i = 0; i < GRASS_PATCH_COUNT; i++) {
+      const c = base.clone().offsetHSL(Math.random()*0.04-0.02, Math.random()*0.1-0.05, Math.random()*0.1-0.05);
+      arr[i*3]=c.r; arr[i*3+1]=c.g; arr[i*3+2]=c.b;
+    }
+    grassInstMesh.instanceColor.needsUpdate = true;
+  }
+  // Update season buttons
+  document.querySelectorAll('.season-btn').forEach(b => {
+    b.style.background = b.dataset.season===season ? 'rgba(100,200,100,0.6)' : 'rgba(200,50,50,0.6)';
+  });
+  // Toggle snow
+  snowActive = season === 'winter';
+  if (!snowActive) { snowTargetOpacity = 0; snowGroup.visible = false; }
+  else { snowGroup.visible = true; snowTargetOpacity = 0.6; }
+}
+
+// ── Snow System (Winter Only) ───────────────────────────────────
+let snowActive = false, snowTargetOpacity = 0;
+const snowGroup = new THREE.Group(); snowGroup.visible = false; scene.add(snowGroup);
+const SNOW_COUNT = 800;
+const snowGeo = new THREE.SphereGeometry(0.06, 4, 3);
+const snowMat = new THREE.MeshStandardMaterial({ color: 0xffffff, depthWrite: false, transparent: true, opacity: 0.85 });
+const snowFlakes = [];
+for (let i = 0; i < SNOW_COUNT; i++) {
+  const s = new THREE.Mesh(snowGeo, snowMat);
+  s.position.set((Math.random()-0.5)*60, 20+Math.random()*30, (Math.random()-0.5)*60);
+  s.userData.vy = -(0.8+Math.random()*1.5);
+  s.userData.vx = (Math.random()-0.5)*0.3;
+  s.userData.vz = (Math.random()-0.5)*0.3;
+  snowGroup.add(s); snowFlakes.push(s);
+}
+// Snow ground cover
+const snowGroundMat = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false });
+const snowGround = new THREE.Mesh(new THREE.PlaneGeometry(2000, 2000), snowGroundMat);
+snowGround.rotation.x = -Math.PI/2; snowGround.position.y = 0.1; snowGround.visible = false; scene.add(snowGround);
+
+function updateSnow(dt) {
+  // Fade ground opacity
+  const diff = snowTargetOpacity - snowGroundMat.opacity;
+  if (Math.abs(diff) > 0.001) snowGroundMat.opacity += Math.sign(diff) * dt / 3;
+  snowGround.visible = snowGroundMat.opacity > 0.01;
+  if (!snowActive) return;
+  const pp = inVR ? cameraRig.position : camera.position;
+  for (const s of snowFlakes) {
+    s.position.y += s.userData.vy * dt;
+    s.position.x += s.userData.vx * dt;
+    s.position.z += s.userData.vz * dt;
+    const th = getTerrainHeight(s.position.x, s.position.z);
+    if (s.position.y < th) {
+      s.position.set(pp.x+(Math.random()-0.5)*60, pp.y+30+Math.random()*20, pp.z+(Math.random()-0.5)*60);
+      s.userData.vy = -(0.8+Math.random()*1.5);
+      s.userData.vx = (Math.random()-0.5)*0.3;
+      s.userData.vz = (Math.random()-0.5)*0.3;
+    }
+  }
+}
+
+// ── Binocular Zoom ──────────────────────────────────────────────
+const ZOOM_FOVS = [70, 35, 17.5, 8.75], ZOOM_LABELS = ['1x','2x','4x','8x'];
+let zoomLevel = 0, targetFOV = 70, zHeld = false, vrZoom = false;
+const zoomVig = document.getElementById('zoom-vignette'), zoomHud = document.getElementById('zoom-hud');
+document.addEventListener('wheel', (e) => {
+  if (!isLocked || gamePaused || inVR) return;
+  if (e.deltaY < 0) zoomLevel = Math.min(zoomLevel + 1, 3);
+  else zoomLevel = Math.max(zoomLevel - 1, 0);
+  targetFOV = ZOOM_FOVS[zoomLevel];
+}, { passive: true });
+
 // ── Animation loop ─────────────────────────────────────────────────
 const clock = new THREE.Clock();
 let prevTerrainY = getTerrainHeight(0, 0);
@@ -2214,7 +2313,15 @@ function animate() {
           const btns = source.gamepad.buttons;
           if (btns[4] && btns[4].pressed && nearestNPC && !dialogOpen) openNPCDialog(nearestNPC);
           if (btns[5] && btns[5].pressed && onGround) { velocityY = 8; onGround = false; }
-          // Y button (index 5 on left) or B button (index 5 on right) toggles VR settings
+          // Right thumbstick click (btn 3) toggles VR zoom
+          if (btns[3] && btns[3].pressed && vrTurnCooldown <= 0) {
+            vrZoom = !vrZoom; cameraRig.scale.setScalar(vrZoom ? 0.25 : 1); vrTurnCooldown = 0.5;
+            const { ctx: lx, canvas: lc, tex } = vrSettingsGroup.userData;
+            lx.clearRect(0,0,lc.width,lc.height); lx.fillStyle='#fff'; lx.font='bold 28px sans-serif'; lx.textAlign='center';
+            lx.fillText(vrZoom?'4x ZOOM':'Zoom Off',lc.width/2,lc.height/2+10); tex.needsUpdate=true;
+            vrSettingsGroup.visible=true; vrSettingsGroup.position.set(0,1.4,-0.8);
+            setTimeout(()=>{if(!vrZoom)vrSettingsGroup.visible=false;},3000);
+          }
         }
         if (source.handedness === 'left' && source.gamepad && source.gamepad.buttons[5]) {
           if (source.gamepad.buttons[5].pressed && vrTurnCooldown <= 0) {
@@ -2267,6 +2374,13 @@ function animate() {
 
     euler.set(pitch, yaw, 0);
     camera.quaternion.setFromEuler(euler);
+    // Zoom FOV lerp
+    camera.fov += (targetFOV - camera.fov) * 0.15;
+    camera.updateProjectionMatrix();
+    const zoomed = zoomLevel > 0;
+    zoomVig.style.display = zoomed ? 'block' : 'none';
+    zoomHud.style.display = zoomed ? 'block' : 'none';
+    if (zoomed) zoomHud.textContent = ZOOM_LABELS[zoomLevel];
 
     hudPos.textContent = `${camera.position.x.toFixed(0)}, ${camera.position.z.toFixed(0)}`;
     hudDir.textContent = getCardinal(yaw);
@@ -2324,6 +2438,7 @@ function animate() {
   updateMushrooms(dt);
   updateSigns();
   updateMirrorLake();
+  updateSnow(dt);
 
   // Animate water UV
   waterGeo.attributes.uv.array[0] += dt * 0.02; waterGeo.attributes.uv.array[2] += dt * 0.02;
@@ -2425,6 +2540,7 @@ if (!loadGame()) {
   prevTerrainY = startY;
 }
 
+setSeason(currentSeason);
 renderer.setAnimationLoop(animate);
 </script>
 </body>
