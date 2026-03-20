@@ -309,6 +309,7 @@ function getVRThumbstickAxes(handedness) {
 
 // ── Stamina ─────────────────────────────────────────────────────────
 let stamina = 100, sprintLocked = false;
+let velocityY = 0, onGround = true;
 const staminaFill = document.getElementById('stamina-fill');
 function getVRGripPressed() {
   const session = renderer.xr.getSession();
@@ -1053,6 +1054,7 @@ document.addEventListener('mousemove', (e) => {
 document.addEventListener('keydown', (e) => {
   keys[e.code] = true;
   if (e.code === 'KeyE' && nearestNPC && !dialogOpen) openNPCDialog(nearestNPC);
+  if (e.code === 'Space' && onGround) { velocityY = 8; onGround = false; }
 });
 document.addEventListener('keyup', (e) => { keys[e.code] = false; });
 
@@ -1106,9 +1108,11 @@ function animate() {
     cameraRig.position.x = THREE.MathUtils.clamp(cameraRig.position.x, -halfVR, halfVR);
     cameraRig.position.z = THREE.MathUtils.clamp(cameraRig.position.z, -halfVR, halfVR);
 
-    // Ground following for VR rig
+    // Gravity for VR rig
     const vrTerrainY = getTerrainHeight(cameraRig.position.x, cameraRig.position.z);
-    cameraRig.position.y = THREE.MathUtils.lerp(cameraRig.position.y, vrTerrainY, 1 - Math.pow(0.001, dt));
+    velocityY = Math.max(velocityY - 20 * dt, -30);
+    cameraRig.position.y += velocityY * dt;
+    if (cameraRig.position.y <= vrTerrainY) { cameraRig.position.y = vrTerrainY; velocityY = 0; onGround = true; }
 
     // VR A-button (button 4) on right controller to interact with NPC
     const session = renderer.xr.getSession();
@@ -1116,6 +1120,7 @@ function animate() {
       for (const source of session.inputSources) {
         if (source.handedness === 'right' && source.gamepad && source.gamepad.buttons[4]) {
           if (source.gamepad.buttons[4].pressed && nearestNPC && !dialogOpen) openNPCDialog(nearestNPC);
+          if (source.gamepad.buttons[5] && source.gamepad.buttons[5].pressed && onGround) { velocityY = 8; onGround = false; }
         }
       }
     }
@@ -1152,9 +1157,11 @@ function animate() {
     camera.position.z = THREE.MathUtils.clamp(camera.position.z, -halfSize, halfSize);
 
     const terrainY = getTerrainHeight(camera.position.x, camera.position.z);
-    const targetY = terrainY + PLAYER_HEIGHT;
-    prevTerrainY = THREE.MathUtils.lerp(prevTerrainY, targetY, 1 - Math.pow(0.001, dt));
-    camera.position.y = prevTerrainY;
+    const groundY = terrainY + PLAYER_HEIGHT;
+    velocityY = Math.max(velocityY - 20 * dt, -30);
+    camera.position.y += velocityY * dt;
+    if (camera.position.y <= groundY) { camera.position.y = groundY; velocityY = 0; onGround = true; }
+    prevTerrainY = camera.position.y;
 
     euler.set(pitch, yaw, 0);
     camera.quaternion.setFromEuler(euler);
