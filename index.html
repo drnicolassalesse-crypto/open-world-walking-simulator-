@@ -174,6 +174,20 @@
     border: 1px solid rgba(255,255,255,0.12); border-radius: 8px;
     padding: 8px 18px; pointer-events: none; display: none;
   }
+  #inventory-panel {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    z-index: 350; display: none; align-items: center; justify-content: center;
+    background: rgba(0,0,0,0.7); backdrop-filter: blur(10px);
+    border: 1px solid rgba(255,255,255,0.15); border-radius: 14px;
+    padding: 24px 28px; color: #fff;
+  }
+  #inventory-panel h3 { font-size: 16px; font-weight: 300; letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 12px; text-align: center; }
+  #inv-grid { display: grid; grid-template-columns: repeat(4,48px); gap: 6px; }
+  .inv-slot {
+    width: 48px; height: 48px; background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.15); border-radius: 6px;
+    display: flex; align-items: center; justify-content: center; font-size: 22px;
+  }
 </style>
 </head>
 <body>
@@ -229,6 +243,7 @@
 <div id="settings-panel"><button id="reset-save-btn">Reset Save</button></div>
 <canvas id="minimap" width="150" height="150"></canvas>
 <div id="interact-hint">Press <kbd style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);border-radius:3px;padding:1px 6px">E</kbd> to talk</div>
+<div id="inventory-panel"><h3>Inventory</h3><div id="inv-grid"></div></div>
 
 <script type="importmap">
 {
@@ -1057,6 +1072,74 @@ function updateDeer(dt) {
     questState: 'idle', questGemsNeeded: 5 });
 }
 
+// ── Ancient Ruins ────────────────────────────────────────────────
+let ruinsBuff = 0; // seconds remaining of stamina regen buff
+const ruinsPos = new THREE.Vector3(30, 0, 50);
+{
+  const ry = getTerrainHeight(30, 50);
+  ruinsPos.y = ry;
+  // Stone floor
+  const floor = new THREE.Mesh(new THREE.CylinderGeometry(8, 8, 0.3, 6),
+    new THREE.MeshStandardMaterial({ color: 0x888877, roughness: 0.95, flatShading: true }));
+  floor.position.set(30, ry + 0.15, 50); floor.receiveShadow = true; scene.add(floor);
+  // 4 pillars
+  const pillarGeo = new THREE.CylinderGeometry(0.6, 0.7, 8, 8);
+  const pillarMat = new THREE.MeshStandardMaterial({ color: 0x999988, roughness: 0.9, flatShading: true });
+  const offsets = [[-5,0,-5],[5,0,-5],[5,0,5],[-5,0,5]];
+  for (const [ox,,oz] of offsets) {
+    const p = new THREE.Mesh(pillarGeo, pillarMat);
+    p.position.set(30+ox, ry+4, 50+oz); p.castShadow = true; p.receiveShadow = true; scene.add(p);
+  }
+  // Glowing cyan altar
+  const altarMat = new THREE.MeshStandardMaterial({ color: 0x00ffcc, emissive: 0x00ffcc, emissiveIntensity: 0.6, roughness: 0.3, metalness: 0.4 });
+  const altar = new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.2, 1.5), altarMat);
+  altar.position.set(30, ry + 0.9, 50); altar.castShadow = true; scene.add(altar);
+  const altarLight = new THREE.PointLight(0x00ffcc, 1.5, 12);
+  altarLight.position.set(30, ry + 2, 50); scene.add(altarLight);
+}
+
+function updateRuins(dt) {
+  const pp = inVR ? cameraRig.position : camera.position;
+  const dx = pp.x - ruinsPos.x, dz = pp.z - ruinsPos.z;
+  if (Math.sqrt(dx*dx+dz*dz) < 3 && ruinsBuff <= 0) {
+    ruinsBuff = 60; // 60s buff
+    const t = document.getElementById('save-toast');
+    t.textContent = 'Ancient power! Stamina regen x2 for 60s';
+    t.style.opacity = '1'; setTimeout(() => { t.style.opacity = '0'; t.textContent = 'Game saved'; }, 3000);
+  }
+  if (ruinsBuff > 0) ruinsBuff -= dt;
+}
+
+// ── Bird Flocks ──────────────────────────────────────────────────
+const birdFlocks = [];
+{
+  const birdGeo = new THREE.BoxGeometry(0.3, 0.1, 0.5);
+  const birdMat = new THREE.MeshStandardMaterial({ color: 0x333344, roughness: 0.8 });
+  const flockCenters = [{ x: -60, y: 20, z: 40 }, { x: 150, y: 95, z: -120 }]; // forest & floating island
+  for (const fc of flockCenters) {
+    const flock = { center: fc, birds: [] };
+    for (let i = 0; i < 5; i++) {
+      const mesh = new THREE.Mesh(birdGeo, birdMat);
+      mesh.castShadow = true; scene.add(mesh);
+      flock.birds.push({ mesh, angle: (i / 5) * Math.PI * 2, radius: 6 + Math.random() * 4, phase: Math.random() * Math.PI * 2 });
+    }
+    birdFlocks.push(flock);
+  }
+}
+
+function updateBirds(elapsed) {
+  for (const f of birdFlocks) {
+    for (const b of f.birds) {
+      b.angle += 0.4 * (1 / 60); // orbit speed
+      const x = f.center.x + Math.cos(b.angle) * b.radius;
+      const z = f.center.z + Math.sin(b.angle) * b.radius;
+      const y = f.center.y + Math.sin(elapsed * 1.5 + b.phase) * 1.5;
+      b.mesh.position.set(x, y, z);
+      b.mesh.rotation.y = -b.angle + Math.PI / 2;
+    }
+  }
+}
+
 // ── Collectible Gems ────────────────────────────────────────────────
 const GEM_COUNT = 15, GEM_COLLECT_DIST = 2;
 const gemColors = [0xff3333, 0x3399ff, 0x33cc66, 0xffcc00, 0xaa44ff];
@@ -1110,6 +1193,7 @@ function updateCoins(dt, elapsed) {
     if (Math.sqrt(dx*dx + dz*dz) < COIN_DIST) {
       c.collected = true; scene.remove(c.mesh); coinScore += 10;
       document.getElementById('coin-score').textContent = `Coins: ${coinScore}`;
+      addToInventory('coin');
     }
   }
 }
@@ -1124,6 +1208,7 @@ function updateGems(dt, elapsed) {
     if (Math.sqrt(dx*dx + dz*dz) < GEM_COLLECT_DIST) {
       g.collected = true; scene.remove(g.mesh); gemsCollected++;
       document.getElementById('hud-gems').textContent = `${gemsCollected} / ${GEM_COUNT}`;
+      addToInventory(gems.indexOf(g) === gems.length - 1 ? 'specialgem' : 'gem');
     }
   }
   // VR: check right controller world position against gems
@@ -1134,10 +1219,44 @@ function updateGems(dt, elapsed) {
       if (cPos.distanceTo(g.mesh.position) < GEM_COLLECT_DIST) {
         g.collected = true; scene.remove(g.mesh); gemsCollected++;
         document.getElementById('hud-gems').textContent = `${gemsCollected} / ${GEM_COUNT}`;
+        addToInventory(gems.indexOf(g) === gems.length - 1 ? 'specialgem' : 'gem');
       }
     }
   }
 }
+
+// ── Inventory System ──────────────────────────────────────────────
+const MAX_INV = 8;
+const inventory = []; // { type: 'gem'|'specialgem'|'coin', color: hex }
+let inventoryOpen = false;
+const invPanel = document.getElementById('inventory-panel');
+const invGrid = document.getElementById('inv-grid');
+
+function addToInventory(type) {
+  if (inventory.length >= MAX_INV) return;
+  inventory.push({ type });
+  renderInventory();
+}
+function renderInventory() {
+  invGrid.innerHTML = '';
+  for (let i = 0; i < MAX_INV; i++) {
+    const slot = document.createElement('div'); slot.className = 'inv-slot';
+    if (i < inventory.length) {
+      const it = inventory[i];
+      if (it.type === 'gem') slot.innerHTML = '<span style="color:#33cc66">&#9670;</span>';
+      else if (it.type === 'specialgem') slot.innerHTML = '<span style="color:#ff00ff">&#9670;</span>';
+      else if (it.type === 'coin') slot.innerHTML = '<span style="color:#FFD700">&#9679;</span>';
+    }
+    invGrid.appendChild(slot);
+  }
+}
+function toggleInventory() {
+  inventoryOpen = !inventoryOpen;
+  invPanel.style.display = inventoryOpen ? 'block' : 'none';
+  if (inventoryOpen) { renderInventory(); if (!inVR) document.exitPointerLock(); }
+  else if (!inVR) renderer.domElement.requestPointerLock();
+}
+renderInventory();
 
 // ── NPCs ──────────────────────────────────────────────────────────
 const NPC_DIST = 5, npcs = [], npcDefs = [
@@ -1338,6 +1457,8 @@ document.getElementById('pause-reset').addEventListener('click', () => {
 });
 
 document.addEventListener('keydown', (e) => {
+  if (e.code === 'KeyI') { toggleInventory(); return; }
+  if (e.code === 'Escape' && inventoryOpen) { toggleInventory(); return; }
   if (e.code === 'Escape' && dialogOpen) { closeDialog(); return; }
   if (e.code === 'Escape' && !dialogOpen) { e.preventDefault(); togglePause(); return; }
   if (dialogOpen && dialogShowingChoice) {
@@ -1475,7 +1596,7 @@ function animate() {
       stamina = Math.max(0, stamina - 20 * dt);
       if (stamina <= 0) sprintLocked = true;
     } else {
-      stamina = Math.min(100, stamina + 15 * dt);
+      stamina = Math.min(100, stamina + (ruinsBuff > 0 ? 30 : 15) * dt);
       if (sprintLocked && stamina >= 20) sprintLocked = false;
     }
     staminaFill.style.width = stamina + '%';
@@ -1508,6 +1629,8 @@ function animate() {
   // Update NPCs & Deer
   updateNPCs(dt);
   updateDeer(dt);
+  updateRuins(dt);
+  updateBirds(clock.elapsedTime);
 
   // Animate water UV
   waterGeo.attributes.uv.array[0] += dt * 0.02; waterGeo.attributes.uv.array[2] += dt * 0.02;
@@ -1562,6 +1685,7 @@ function saveGame() {
     npcQuests: npcs.map(n => n.questState),
     gemCollected: gems.map(g => g.collected),
     coinScore, coinCollected: coins.map(c => c.collected),
+    inventory: inventory.slice(),
   };
   localStorage.setItem('wanderer_save', JSON.stringify(data));
   saveToast.style.opacity = '1';
@@ -1582,6 +1706,7 @@ function loadGame() {
     if (d.gemCollected) d.gemCollected.forEach((c, i) => { if (gems[i] && c) { gems[i].collected = true; scene.remove(gems[i].mesh); } });
     if (d.coinScore) { coinScore = d.coinScore; document.getElementById('coin-score').textContent = `Coins: ${coinScore}`; }
     if (d.coinCollected) d.coinCollected.forEach((c, i) => { if (coins[i] && c) { coins[i].collected = true; scene.remove(coins[i].mesh); } });
+    if (d.inventory) { inventory.length = 0; d.inventory.forEach(it => inventory.push(it)); renderInventory(); }
     return true;
   } catch { return false; }
 }
