@@ -434,6 +434,18 @@ const terrain = generateTerrain();
 scene.add(terrain);
 scene.add(cameraRig);
 
+// ── Water Plane ─────────────────────────────────────────────────────
+const waterGeo = new THREE.PlaneGeometry(TERRAIN_SIZE, TERRAIN_SIZE, 1, 1);
+waterGeo.rotateX(-Math.PI / 2);
+const waterMat = new THREE.MeshStandardMaterial({
+  color: 0x1a6fa8, transparent: true, opacity: 0.75,
+  metalness: 0.1, roughness: 0.1, side: THREE.DoubleSide,
+});
+const waterPlane = new THREE.Mesh(waterGeo, waterMat);
+waterPlane.position.y = -2;
+waterPlane.receiveShadow = true;
+scene.add(waterPlane);
+
 // Height sampling via raycaster
 const terrainRaycaster = new THREE.Raycaster();
 const downVec = new THREE.Vector3(0, -1, 0);
@@ -914,6 +926,12 @@ function animate() {
 
   // Update NPCs
   updateNPCs(dt);
+
+  // Animate water UV
+  waterGeo.attributes.uv.array[0] += dt * 0.02; waterGeo.attributes.uv.array[2] += dt * 0.02;
+  waterGeo.attributes.uv.array[4] += dt * 0.02; waterGeo.attributes.uv.array[6] += dt * 0.02;
+  waterGeo.attributes.uv.needsUpdate = true;
+  waterPlane.position.y = -2 + Math.sin(clock.elapsedTime * 0.5) * 0.3;
 
   // Animate clouds
   for (const cloud of clouds) {
