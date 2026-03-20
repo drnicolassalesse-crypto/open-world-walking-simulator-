@@ -97,6 +97,8 @@
     font-family: inherit; font-size: 13px; transition: background 0.2s;
   }
   #npc-dialog button:hover { background: rgba(255,255,255,0.25); }
+  #dialog-choices { margin-top: 10px; display: none; }
+  #dialog-choices button { margin: 4px 6px; padding: 6px 18px; font-size: 12px; }
 
   #minimap {
     position: fixed; bottom: 20px; right: 20px; z-index: 50;
@@ -157,6 +159,14 @@
   #pause-menu .pause-btn:hover { background: rgba(255,255,255,0.2); }
   #pause-controls { font-size: 12px; color: rgba(255,255,255,0.5); line-height: 1.8; margin-top: 12px; display: none; }
 
+  #coin-score {
+    position: fixed; top: 20px; right: 20px; z-index: 50;
+    color: #FFD700; font-size: 18px; font-weight: bold;
+    background: rgba(0,0,0,0.35); backdrop-filter: blur(6px);
+    border: 1px solid rgba(255,215,0,0.2); border-radius: 8px;
+    padding: 8px 16px; pointer-events: none;
+  }
+
   #interact-hint {
     position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
     z-index: 50; color: rgba(255,255,255,0.8); font-size: 13px;
@@ -190,7 +200,8 @@
   <span class="label">ALT</span> <span id="hud-alt">0</span>m<br>
   <span class="label">TIME</span> <span id="hud-time">06:00</span><br>
   <span class="label">GEMS</span> <span id="hud-gems">0 / 15</span><br>
-  <span class="label">SKY</span> <span id="hud-weather">☀️ Clear</span>
+  <span class="label">SKY</span> <span id="hud-weather">☀️ Clear</span><br>
+  <span class="label">DEER</span> <span id="hud-deer">0 scared</span>
   <div id="stamina-bar"><div id="stamina-fill" style="background:#4CAF50"></div></div>
 </div>
 
@@ -198,6 +209,7 @@
   <div class="dialog-box">
     <div class="npc-name" id="dialog-name"></div>
     <div class="npc-msg" id="dialog-msg"></div>
+    <div id="dialog-choices"><button id="dialog-c1">[1] Quest Hint</button><button id="dialog-c2">[2] Lore</button></div>
     <button id="dialog-close">Close</button>
   </div>
 </div>
@@ -210,6 +222,7 @@
     <div id="pause-controls">WASD=move, Shift=sprint, Space=jump<br>E=talk, Tab=settings, Mouse=look<br>Esc=pause</div>
   </div>
 </div>
+<div id="coin-score">Coins: 0</div>
 <div id="rain-overlay"></div>
 <div id="lightning-flash"></div>
 <div id="save-toast">Game saved</div>
@@ -935,6 +948,66 @@ function updateCampfires(dt, elapsed) {
   }
 }
 
+// ── Roaming Deer ────────────────────────────────────────────────────
+const deer = [];
+let deerScared = 0;
+const deerMat = new THREE.MeshStandardMaterial({ color: 0x8B6914, roughness: 0.8 });
+const legMat = new THREE.MeshStandardMaterial({ color: 0x6B4F10, roughness: 0.85 });
+
+for (let i = 0; i < 3; i++) {
+  const g = new THREE.Group();
+  // Body
+  const body = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.7, 0.6), deerMat);
+  body.position.y = 1.2; body.castShadow = true; g.add(body);
+  // Head
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, 0.4), deerMat);
+  head.position.set(0.7, 1.6, 0); head.castShadow = true; g.add(head);
+  // 4 legs
+  const legGeo = new THREE.BoxGeometry(0.15, 0.8, 0.15);
+  for (const [lx, lz] of [[-0.4,-0.15],[0.4,-0.15],[-0.4,0.15],[0.4,0.15]]) {
+    const leg = new THREE.Mesh(legGeo, legMat);
+    leg.position.set(lx, 0.5, lz); leg.castShadow = true; g.add(leg);
+  }
+  const a = Math.random() * Math.PI * 2, r = 40 + Math.random() * 150;
+  const dx = Math.cos(a) * r, dz = Math.sin(a) * r;
+  g.position.set(dx, getTerrainHeight(dx, dz), dz);
+  scene.add(g);
+  deer.push({ group: g, target: new THREE.Vector3(dx + (Math.random()-0.5)*60, 0, dz + (Math.random()-0.5)*60),
+    timer: 4 + Math.random() * 2, fleeing: false, fleeTimer: 0, speed: 3 });
+}
+
+function updateDeer(dt) {
+  const pp = inVR ? cameraRig.position : camera.position;
+  let scared = 0;
+  for (const d of deer) {
+    const p = d.group.position;
+    const dx = pp.x - p.x, dz = pp.z - p.z, dist = Math.sqrt(dx*dx + dz*dz);
+    if (dist < 8 && !d.fleeing) {
+      d.fleeing = true; d.fleeTimer = 3; d.speed = 8; scared++;
+      d.target.set(p.x - dx * 5, 0, p.z - dz * 5);
+    }
+    if (d.fleeing) {
+      d.fleeTimer -= dt;
+      if (d.fleeTimer <= 0) { d.fleeing = false; d.speed = 3; d.timer = 0; }
+    }
+    d.timer -= dt;
+    if (d.timer <= 0 && !d.fleeing) {
+      d.target.set(p.x + (Math.random()-0.5)*80, 0, p.z + (Math.random()-0.5)*80);
+      d.timer = 4 + Math.random() * 2;
+    }
+    const tdx = d.target.x - p.x, tdz = d.target.z - p.z;
+    const tDist = Math.sqrt(tdx*tdx + tdz*tdz);
+    if (tDist > 1) {
+      p.x += (tdx/tDist) * d.speed * dt; p.z += (tdz/tDist) * d.speed * dt;
+      d.group.rotation.y = Math.atan2(tdx, tdz);
+    }
+    p.y = getTerrainHeight(p.x, p.z);
+    if (d.fleeing) scared++;
+  }
+  deerScared = scared;
+  document.getElementById('hud-deer').textContent = `${deerScared} scared`;
+}
+
 // ── Floating Island ─────────────────────────────────────────────────
 {
   const islandGroup = new THREE.Group();
@@ -969,7 +1042,7 @@ function updateCampfires(dt, elapsed) {
   }
   scene.add(islandGroup);
   // Wizard NPC on island
-  npcDefs.push({ name:'Zephyr', color:0x9B59B6, msgs:['You found the sky island! The view from up here is breathtaking.','The clouds are so close I can almost touch them.','Few have made it this high. You are special.'] });
+  npcDefs.push({ name:'Zephyr', color:0x9B59B6, msgs:['You found the sky island! The view from up here is breathtaking.','The clouds are so close I can almost touch them.','Few have made it this high. You are special.'], hint:'There is a special gem hidden on this very island.', lore:'This island was lifted by ancient magic millennia ago.' });
   const zd = npcDefs[npcDefs.length - 1], zg = new THREE.Group();
   const zMat = new THREE.MeshStandardMaterial({ color: zd.color, roughness: 0.7 });
   const zBody = new THREE.Mesh(new THREE.CapsuleGeometry(0.45, 1.2, 4, 8), zMat);
@@ -1010,6 +1083,37 @@ for (let i = 0; i < GEM_COUNT; i++) {
   gems.push({ mesh: iGem, baseY: 89.5, collected: false });
 }
 
+// ── Collectible Coins ────────────────────────────────────────────────
+const COIN_COUNT = 15, COIN_DIST = 1.5;
+const coins = [];
+let coinScore = 0;
+const coinGeo = new THREE.CylinderGeometry(0.3, 0.3, 0.1, 12);
+const coinMat = new THREE.MeshStandardMaterial({ color: 0xFFD700, emissive: 0xFFD700, emissiveIntensity: 0.3, metalness: 0.8, roughness: 0.2 });
+
+for (let i = 0; i < COIN_COUNT; i++) {
+  const mesh = new THREE.Mesh(coinGeo, coinMat);
+  const a = Math.random() * Math.PI * 2, r = 15 + Math.random() * 250;
+  const cx = Math.cos(a) * r, cz = Math.sin(a) * r;
+  mesh.position.set(cx, getTerrainHeight(cx, cz) + 1.2, cz);
+  mesh.castShadow = true;
+  scene.add(mesh);
+  coins.push({ mesh, baseY: mesh.position.y, collected: false });
+}
+
+function updateCoins(dt, elapsed) {
+  const pp = inVR ? cameraRig.position : camera.position;
+  for (const c of coins) {
+    if (c.collected) continue;
+    c.mesh.rotation.y += 0.02;
+    c.mesh.position.y = c.baseY + Math.sin(elapsed * 2 + c.baseY) * 0.2;
+    const dx = pp.x - c.mesh.position.x, dz = pp.z - c.mesh.position.z;
+    if (Math.sqrt(dx*dx + dz*dz) < COIN_DIST) {
+      c.collected = true; scene.remove(c.mesh); coinScore += 10;
+      document.getElementById('coin-score').textContent = `Coins: ${coinScore}`;
+    }
+  }
+}
+
 function updateGems(dt, elapsed) {
   const pp = inVR ? cameraRig.position : camera.position;
   for (const g of gems) {
@@ -1037,22 +1141,33 @@ function updateGems(dt, elapsed) {
 
 // ── NPCs ──────────────────────────────────────────────────────────
 const NPC_DIST = 5, npcs = [], npcDefs = [
-  { name:'Elara', color:0xE84393, msgs:['The sunset from the hilltop is breathtaking.','Have you seen the flowers by the valley?','I come here to think. It\'s peaceful.'] },
-  { name:'Finn', color:0x0984E3, msgs:['Watch your step on the slopes!','I\'ve been mapping these hills for years.','There\'s a great view to the north.'] },
-  { name:'Sage', color:0x6C5CE7, msgs:['The wind carries stories, if you listen.','Every rock here has a history.','I wonder what lies beyond the fog.'] },
-  { name:'Rowan', color:0x00B894, msgs:['These trees have been here for centuries.','I planted a garden just over that ridge.','Nature always finds a way.'] },
-  { name:'Mira', color:0xFDCB6E, msgs:['Hello, traveler! Beautiful day, isn\'t it?','I love how the light changes here.','Have you explored the eastern hills yet?'] },
+  { name:'Elara', color:0xE84393, msgs:['The sunset from the hilltop is breathtaking.','Have you seen the flowers by the valley?','I come here to think. It\'s peaceful.'], hint:'Gems glow brighter at dawn — check the eastern ridge.', lore:'This valley was once a lake, thousands of years ago.' },
+  { name:'Finn', color:0x0984E3, msgs:['Watch your step on the slopes!','I\'ve been mapping these hills for years.','There\'s a great view to the north.'], hint:'The floating island can be reached by jumping from the high cliff.', lore:'These hills were formed by ancient glaciers retreating north.' },
+  { name:'Sage', color:0x6C5CE7, msgs:['The wind carries stories, if you listen.','Every rock here has a history.','I wonder what lies beyond the fog.'], hint:'Campfires mark safe resting spots — check near the spawn.', lore:'Legend says a wizard once lived on a floating island above.' },
+  { name:'Rowan', color:0x00B894, msgs:['These trees have been here for centuries.','I planted a garden just over that ridge.','Nature always finds a way.'], hint:'Deer are shy but they lead you to hidden coin stashes.', lore:'The oldest tree here is said to be over a thousand years old.' },
+  { name:'Mira', color:0xFDCB6E, msgs:['Hello, traveler! Beautiful day, isn\'t it?','I love how the light changes here.','Have you explored the eastern hills yet?'], hint:'Coins are scattered near flowers — look for golden glints.', lore:'The day-night cycle here lasts exactly five minutes.' },
 ];
 const npcDialog = document.getElementById('npc-dialog');
 const dialogName = document.getElementById('dialog-name');
 const dialogMsg = document.getElementById('dialog-msg');
 const interactHint = document.getElementById('interact-hint');
-let dialogOpen = false, nearestNPC = null;
+let dialogOpen = false, nearestNPC = null, dialogNPC = null, dialogShowingChoice = false;
+const dialogChoices = document.getElementById('dialog-choices');
 
-document.getElementById('dialog-close').addEventListener('click', () => {
-  npcDialog.style.display = 'none'; dialogOpen = false;
+function closeDialog() {
+  npcDialog.style.display = 'none'; dialogOpen = false; dialogShowingChoice = false;
+  dialogChoices.style.display = 'none';
   if (!inVR) renderer.domElement.requestPointerLock();
-});
+}
+document.getElementById('dialog-close').addEventListener('click', closeDialog);
+
+function handleDialogChoice(choice) {
+  if (!dialogNPC || !dialogShowingChoice) return;
+  dialogMsg.textContent = choice === 1 ? (dialogNPC.def.hint || 'No hint available.') : (dialogNPC.def.lore || 'No lore available.');
+  dialogChoices.style.display = 'none'; dialogShowingChoice = false;
+}
+document.getElementById('dialog-c1').addEventListener('click', () => handleDialogChoice(1));
+document.getElementById('dialog-c2').addEventListener('click', () => handleDialogChoice(2));
 
 function makeNameSprite(name) {
   const c = document.createElement('canvas'); c.width = 256; c.height = 64;
@@ -1087,14 +1202,13 @@ for (let i = 0; i < npcDefs.length; i++) {
 }
 
 function openNPCDialog(npc) {
-  dialogOpen = true;
+  dialogOpen = true; dialogNPC = npc; dialogShowingChoice = false;
+  dialogChoices.style.display = 'none';
   dialogName.textContent = npc.def.name;
   if (npc.questState === 'idle') {
-    // First interaction: give quest
     dialogMsg.textContent = `Can you collect ${npc.questGemsNeeded} gems for me?`;
     npc.questState = 'quest_given';
   } else if (npc.questState === 'quest_given' && gemsCollected >= npc.questGemsNeeded) {
-    // Player has enough gems: reward
     gemsCollected += 5;
     document.getElementById('hud-gems').textContent = `${gemsCollected} / ${GEM_COUNT}`;
     dialogMsg.textContent = 'Thank you! Here is your reward: +5 gems to your count!';
@@ -1102,7 +1216,11 @@ function openNPCDialog(npc) {
   } else if (npc.questState === 'quest_given') {
     dialogMsg.textContent = `I need ${npc.questGemsNeeded} gems. You only have ${gemsCollected} so far. Keep looking!`;
   } else {
-    dialogMsg.textContent = npc.def.msgs[npc.msgIdx++ % npc.def.msgs.length];
+    const idx = npc.msgIdx++ % npc.def.msgs.length;
+    dialogMsg.textContent = npc.def.msgs[idx];
+    if (idx === 1 && (npc.def.hint || npc.def.lore)) {
+      dialogChoices.style.display = 'block'; dialogShowingChoice = true;
+    }
   }
   npcDialog.style.display = 'flex';
   if (!inVR) document.exitPointerLock();
@@ -1220,7 +1338,13 @@ document.getElementById('pause-reset').addEventListener('click', () => {
 });
 
 document.addEventListener('keydown', (e) => {
+  if (e.code === 'Escape' && dialogOpen) { closeDialog(); return; }
   if (e.code === 'Escape' && !dialogOpen) { e.preventDefault(); togglePause(); return; }
+  if (dialogOpen && dialogShowingChoice) {
+    if (e.code === 'Digit1') handleDialogChoice(1);
+    if (e.code === 'Digit2') handleDialogChoice(2);
+    return;
+  }
   if (gamePaused) return;
   keys[e.code] = true;
   if (e.code === 'KeyE' && nearestNPC && !dialogOpen) openNPCDialog(nearestNPC);
@@ -1377,11 +1501,13 @@ function animate() {
   minimapCanvas.style.display = inVR ? 'none' : 'block';
   if (!inVR) drawMinimap();
 
-  // Update gems
+  // Update gems & coins
   updateGems(dt, clock.elapsedTime);
+  updateCoins(dt, clock.elapsedTime);
 
-  // Update NPCs
+  // Update NPCs & Deer
   updateNPCs(dt);
+  updateDeer(dt);
 
   // Animate water UV
   waterGeo.attributes.uv.array[0] += dt * 0.02; waterGeo.attributes.uv.array[2] += dt * 0.02;
@@ -1435,6 +1561,7 @@ function saveGame() {
     px: camera.position.x, pz: camera.position.z, gems: gemsCollected,
     npcQuests: npcs.map(n => n.questState),
     gemCollected: gems.map(g => g.collected),
+    coinScore, coinCollected: coins.map(c => c.collected),
   };
   localStorage.setItem('wanderer_save', JSON.stringify(data));
   saveToast.style.opacity = '1';
@@ -1453,6 +1580,8 @@ function loadGame() {
     document.getElementById('hud-gems').textContent = `${gemsCollected} / ${GEM_COUNT}`;
     if (d.npcQuests) d.npcQuests.forEach((q, i) => { if (npcs[i]) npcs[i].questState = q; });
     if (d.gemCollected) d.gemCollected.forEach((c, i) => { if (gems[i] && c) { gems[i].collected = true; scene.remove(gems[i].mesh); } });
+    if (d.coinScore) { coinScore = d.coinScore; document.getElementById('coin-score').textContent = `Coins: ${coinScore}`; }
+    if (d.coinCollected) d.coinCollected.forEach((c, i) => { if (coins[i] && c) { coins[i].collected = true; scene.remove(coins[i].mesh); } });
     return true;
   } catch { return false; }
 }
