@@ -188,6 +188,13 @@
     border: 1px solid rgba(255,255,255,0.15); border-radius: 6px;
     display: flex; align-items: center; justify-content: center; font-size: 22px;
   }
+  #fish-status {
+    position: fixed; top: 40%; left: 50%; transform: translateX(-50%);
+    z-index: 300; color: #fff; font-size: 16px; text-align: center;
+    background: rgba(0,0,0,0.55); backdrop-filter: blur(6px);
+    border: 1px solid rgba(255,255,255,0.12); border-radius: 10px;
+    padding: 12px 24px; display: none;
+  }
 </style>
 </head>
 <body>
@@ -215,7 +222,8 @@
   <span class="label">TIME</span> <span id="hud-time">06:00</span><br>
   <span class="label">GEMS</span> <span id="hud-gems">0 / 15</span><br>
   <span class="label">SKY</span> <span id="hud-weather">☀️ Clear</span><br>
-  <span class="label">DEER</span> <span id="hud-deer">0 scared</span>
+  <span class="label">DEER</span> <span id="hud-deer">0 scared</span><br>
+  <span class="label">FISH</span> <span id="hud-fish">0 caught</span>
   <div id="stamina-bar"><div id="stamina-fill" style="background:#4CAF50"></div></div>
 </div>
 
@@ -244,6 +252,7 @@
 <canvas id="minimap" width="150" height="150"></canvas>
 <div id="interact-hint">Press <kbd style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);border-radius:3px;padding:1px 6px">E</kbd> to talk</div>
 <div id="inventory-panel"><h3>Inventory</h3><div id="inv-grid"></div></div>
+<div id="fish-status"></div>
 
 <script type="importmap">
 {
@@ -1140,6 +1149,52 @@ function updateBirds(elapsed) {
   }
 }
 
+// ── Fishing Pond ────────────────────────────────────────────────
+let fishCaught = 0, isFishing = false;
+const fishStatus = document.getElementById('fish-status');
+const POND_POS = new THREE.Vector3(-40, 0, -30);
+{
+  const py = getTerrainHeight(-40, -30);
+  POND_POS.y = py;
+  // Pond water disc
+  const pond = new THREE.Mesh(new THREE.CylinderGeometry(6, 6, 0.1, 24),
+    new THREE.MeshStandardMaterial({ color: 0x2288cc, transparent: true, opacity: 0.7, roughness: 0.3 }));
+  pond.position.set(-40, py + 0.05, -30); pond.receiveShadow = true; scene.add(pond);
+  // Lily pads
+  const lilyGeo = new THREE.CircleGeometry(0.5, 8);
+  const lilyMat = new THREE.MeshStandardMaterial({ color: 0x33aa44, side: THREE.DoubleSide, roughness: 0.8 });
+  const lilyOffs = [[2,0,1],[-1.5,0,2],[1,0,-2.5],[-2.5,0,-1]];
+  for (const [lx,,lz] of lilyOffs) {
+    const lp = new THREE.Mesh(lilyGeo, lilyMat);
+    lp.rotation.x = -Math.PI/2; lp.position.set(-40+lx, py+0.12, -30+lz); scene.add(lp);
+  }
+  // Dock planks
+  const plankGeo = new THREE.BoxGeometry(1.2, 0.15, 4);
+  const plankMat = new THREE.MeshStandardMaterial({ color: 0x8B6914, roughness: 0.9 });
+  const p1 = new THREE.Mesh(plankGeo, plankMat); p1.position.set(-34.5, py+0.3, -30); p1.castShadow = true; scene.add(p1);
+  const p2 = new THREE.Mesh(plankGeo, plankMat); p2.position.set(-33.3, py+0.3, -30); p2.castShadow = true; scene.add(p2);
+}
+const DOCK_EDGE = new THREE.Vector3(-33, 0, -30);
+DOCK_EDGE.y = getTerrainHeight(-33, -30);
+
+function tryFish() {
+  if (isFishing) return;
+  const pp = inVR ? cameraRig.position : camera.position;
+  const dx = pp.x - DOCK_EDGE.x, dz = pp.z - DOCK_EDGE.z;
+  if (Math.sqrt(dx*dx+dz*dz) > 3) return;
+  isFishing = true;
+  fishStatus.style.display = 'block'; fishStatus.textContent = 'Fishing...';
+  setTimeout(() => {
+    if (Math.random() < 0.8) {
+      fishCaught++; coinScore += 5;
+      document.getElementById('coin-score').textContent = `Coins: ${coinScore}`;
+      fishStatus.textContent = 'Caught a fish! +5 points';
+    } else { fishStatus.textContent = 'Nothing this time...'; }
+    document.getElementById('hud-fish').textContent = `${fishCaught} caught`;
+    setTimeout(() => { fishStatus.style.display = 'none'; isFishing = false; }, 2000);
+  }, 3000);
+}
+
 // ── Collectible Gems ────────────────────────────────────────────────
 const GEM_COUNT = 15, GEM_COLLECT_DIST = 2;
 const gemColors = [0xff3333, 0x3399ff, 0x33cc66, 0xffcc00, 0xaa44ff];
@@ -1469,6 +1524,7 @@ document.addEventListener('keydown', (e) => {
   if (gamePaused) return;
   keys[e.code] = true;
   if (e.code === 'KeyE' && nearestNPC && !dialogOpen) openNPCDialog(nearestNPC);
+  if (e.code === 'KeyF') tryFish();
   if (e.code === 'Space' && onGround) { velocityY = 8; onGround = false; }
 });
 document.addEventListener('keyup', (e) => { keys[e.code] = false; });
@@ -1685,7 +1741,7 @@ function saveGame() {
     npcQuests: npcs.map(n => n.questState),
     gemCollected: gems.map(g => g.collected),
     coinScore, coinCollected: coins.map(c => c.collected),
-    inventory: inventory.slice(),
+    inventory: inventory.slice(), fishCaught,
   };
   localStorage.setItem('wanderer_save', JSON.stringify(data));
   saveToast.style.opacity = '1';
@@ -1707,6 +1763,7 @@ function loadGame() {
     if (d.coinScore) { coinScore = d.coinScore; document.getElementById('coin-score').textContent = `Coins: ${coinScore}`; }
     if (d.coinCollected) d.coinCollected.forEach((c, i) => { if (coins[i] && c) { coins[i].collected = true; scene.remove(coins[i].mesh); } });
     if (d.inventory) { inventory.length = 0; d.inventory.forEach(it => inventory.push(it)); renderInventory(); }
+    if (d.fishCaught) { fishCaught = d.fishCaught; document.getElementById('hud-fish').textContent = `${fishCaught} caught`; }
     return true;
   } catch { return false; }
 }
