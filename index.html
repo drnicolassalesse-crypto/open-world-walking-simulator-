@@ -1269,11 +1269,38 @@ function updateChest(dt) {
     if (chestLidAngle >= Math.PI / 2) {
       chestOpened = true; chestOpening = false;
       coinScore += 50; document.getElementById('coin-score').textContent = `Coins: ${coinScore}`;
+      spawnParticles(new THREE.Vector3(35, getTerrainHeight(35,55)+1, 55), 0xFFD700, 5);
+      spawnParticles(new THREE.Vector3(35, getTerrainHeight(35,55)+1, 55), 0x33cc66, 5);
       for (let i = 0; i < 3; i++) addToInventory('gem');
       const t = document.getElementById('save-toast');
       t.textContent = 'Treasure found! +50 points & 3 gems';
       t.style.opacity = '1'; setTimeout(() => { t.style.opacity = '0'; t.textContent = 'Game saved'; }, 3000);
     }
+  }
+}
+
+// ── Particle Effects ────────────────────────────────────────────────
+const activeParticles = [];
+const particleGeo = new THREE.SphereGeometry(0.1, 4, 3);
+
+function spawnParticles(pos, color, count = 8) {
+  const mat = new THREE.MeshBasicMaterial({ color });
+  for (let i = 0; i < count; i++) {
+    const m = new THREE.Mesh(particleGeo, mat);
+    m.position.copy(pos);
+    const vel = new THREE.Vector3((Math.random()-0.5)*8, Math.random()*4+2, (Math.random()-0.5)*8);
+    scene.add(m);
+    activeParticles.push({ mesh: m, vel, life: 0.5 });
+  }
+}
+
+function updateParticles(dt) {
+  for (let i = activeParticles.length - 1; i >= 0; i--) {
+    const p = activeParticles[i];
+    p.mesh.position.addScaledVector(p.vel, dt);
+    p.vel.y -= 10 * dt;
+    p.life -= dt;
+    if (p.life <= 0) { scene.remove(p.mesh); activeParticles.splice(i, 1); }
   }
 }
 
@@ -1328,6 +1355,7 @@ function updateCoins(dt, elapsed) {
     c.mesh.position.y = c.baseY + Math.sin(elapsed * 2 + c.baseY) * 0.2;
     const dx = pp.x - c.mesh.position.x, dz = pp.z - c.mesh.position.z;
     if (Math.sqrt(dx*dx + dz*dz) < COIN_DIST) {
+      spawnParticles(c.mesh.position.clone(), 0xFFD700);
       c.collected = true; scene.remove(c.mesh); coinScore += 10;
       document.getElementById('coin-score').textContent = `Coins: ${coinScore}`;
       addToInventory('coin');
@@ -1343,9 +1371,11 @@ function updateGems(dt, elapsed) {
     g.mesh.position.y = g.baseY + Math.sin(elapsed * 2 + g.baseY) * 0.3;
     const dx = pp.x - g.mesh.position.x, dz = pp.z - g.mesh.position.z;
     if (Math.sqrt(dx*dx + dz*dz) < GEM_COLLECT_DIST) {
+      const isSpecial = gems.indexOf(g) === gems.length - 1;
+      spawnParticles(g.mesh.position.clone(), isSpecial ? 0xff00ff : 0x33cc66);
       g.collected = true; scene.remove(g.mesh); gemsCollected++;
       document.getElementById('hud-gems').textContent = `${gemsCollected} / ${GEM_COUNT}`;
-      addToInventory(gems.indexOf(g) === gems.length - 1 ? 'specialgem' : 'gem');
+      addToInventory(isSpecial ? 'specialgem' : 'gem');
     }
   }
   // VR: check right controller world position against gems
@@ -1354,9 +1384,11 @@ function updateGems(dt, elapsed) {
     for (const g of gems) {
       if (g.collected) continue;
       if (cPos.distanceTo(g.mesh.position) < GEM_COLLECT_DIST) {
+        const isSpecial = gems.indexOf(g) === gems.length - 1;
+        spawnParticles(g.mesh.position.clone(), isSpecial ? 0xff00ff : 0x33cc66);
         g.collected = true; scene.remove(g.mesh); gemsCollected++;
         document.getElementById('hud-gems').textContent = `${gemsCollected} / ${GEM_COUNT}`;
-        addToInventory(gems.indexOf(g) === gems.length - 1 ? 'specialgem' : 'gem');
+        addToInventory(isSpecial ? 'specialgem' : 'gem');
       }
     }
   }
@@ -1771,6 +1803,7 @@ function animate() {
   updateBirds(clock.elapsedTime);
   updateChest(dt);
   updateTorches();
+  updateParticles(dt);
 
   // Animate water UV
   waterGeo.attributes.uv.array[0] += dt * 0.02; waterGeo.attributes.uv.array[2] += dt * 0.02;
