@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Landmark 81 — Ho Chi Minh City 3D Map</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { overflow: hidden; background: #000; font-family: 'Segoe UI', sans-serif; }
+  #hud {
+    position: fixed; bottom: 20px; left: 20px; z-index: 50;
+    color: rgba(255,255,255,0.8); font-size: 12px;
+    background: rgba(0,0,0,0.45); backdrop-filter: blur(6px);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 10px; padding: 14px 18px;
+    line-height: 1.8; pointer-events: auto;
+  }
+  #hud .label { color: rgba(255,255,255,0.4); font-size: 10px; text-transform: uppercase; letter-spacing: 1px; margin-right: 4px; }
+  #hud a { color: #7ec8e3; text-decoration: none; }
+  #hud a:hover { text-decoration: underline; }
+  #title {
+    position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 50;
+    color: #fff; font-size: 18px; font-weight: bold;
+    background: rgba(0,0,0,0.5); backdrop-filter: blur(6px);
+    padding: 8px 20px; border-radius: 8px;
+    border: 1px solid rgba(255,255,255,0.1);
+    text-align: center;
+  }
+  #title small { display: block; font-size: 11px; font-weight: normal; color: rgba(255,255,255,0.5); margin-top: 2px; }
+  #crosshair {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    width: 20px; height: 20px; z-index: 40; pointer-events: none;
+    border: 2px solid rgba(255,255,255,0.4); border-radius: 50%;
+  }
+  #loading {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.8); z-index: 100;
+    display: flex; align-items: center; justify-content: center;
+    flex-direction: column; color: #fff; font-size: 18px;
+  }
+  #loading .spinner { width: 40px; height: 40px; border: 3px solid rgba(255,255,255,0.2); border-top-color: #7ec8e3; border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 16px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #loading .sub { font-size: 12px; color: rgba(255,255,255,0.5); margin-top: 8px; }
+  #vr-btn {
+    position: fixed; bottom: 20px; right: 20px; z-index: 50;
+    padding: 10px 20px; background: rgba(0,0,0,0.6); color: #fff;
+    border: 1px solid rgba(255,255,255,0.2); border-radius: 8px;
+    cursor: pointer; font-size: 14px; display: none;
+  }
+  #error-msg {
+    position: fixed; top: 70px; left: 50%; transform: translateX(-50%); z-index: 50;
+    background: rgba(180,80,20,0.8); color: #fff; padding: 8px 16px;
+    border-radius: 6px; font-size: 12px; display: none;
+  }
+</style>
+</head>
+<body>
+<div id="loading"><div class="spinner"></div>Loading buildings...<div class="sub">Fetching OpenStreetMap data</div></div>
+<div id="title">Landmark 81 Area — Ho Chi Minh City<small>Click to explore · WASD to move · Shift to sprint</small></div>
+<div id="crosshair"></div>
+<div id="hud">
+  <span class="label">LAT</span> <span id="hud-lat">10.7950</span><br>
+  <span class="label">LON</span> <span id="hud-lon">106.7219</span><br>
+  <span class="label">DIR</span> <span id="hud-dir">N</span><br>
+  <span class="label">BLDG</span> <span id="hud-bldg">0</span><br>
+  <a href="index.html">← Back to main game</a>
+</div>
+<div id="error-msg"></div>
+<button id="vr-btn">Enter VR</button>
+
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.163.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.163.0/examples/jsm/"}}</script>
+<script type="module">
+import * as THREE from 'three';
+
+// ── Constants ──────────────────────────────────────────────────────
+const CENTER_LAT = 10.7950, CENTER_LON = 106.7219;
+const DEG_TO_M_LAT = 110540; // meters per degree latitude
+const DEG_TO_M_LON = 111320 * Math.cos(CENTER_LAT * Math.PI / 180); // ~109600
+const GROUND_SIZE = 1200;
+const WALK_SPEED = 8, SPRINT_SPEED = 20, CAM_HEIGHT = 1.7;
+const COLLISION_MARGIN = 5;
+
+// ── Coordinate helpers ─────────────────────────────────────────────
+function latLonToXZ(lat, lon) {
+  return { x: (lon - CENTER_LON) * DEG_TO_M_LON, z: -(lat - CENTER_LAT) * DEG_TO_M_LAT };
+}
+function xzToLatLon(x, z) {
+  return { lat: CENTER_LAT - z / DEG_TO_M_LAT, lon: CENTER_LON + x / DEG_TO_M_LON };
+}
+
+// ── Renderer ───────────────────────────────────────────────────────
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.xr.enabled = true;
+document.body.appendChild(renderer.domElement);
+
+// ── Scene ──────────────────────────────────────────────────────────
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87ceeb);
+scene.fog = new THREE.FogExp2(0xc8d8e8, 0.0008);
+
+// ── Camera ─────────────────────────────────────────────────────────
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.5, 3000);
+camera.position.set(-200, CAM_HEIGHT, 100);
+
+// ── Lights ─────────────────────────────────────────────────────────
+scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+const sun = new THREE.DirectionalLight(0xffffff, 1.0);
+sun.position.set(200, 400, 100);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.left = -600; sun.shadow.camera.right = 600;
+sun.shadow.camera.top = 600; sun.shadow.camera.bottom = -600;
+sun.shadow.camera.far = 1200;
+scene.add(sun);
+
+// ── Ground plane with OSM tiles ────────────────────────────────────
+const groundGeo = new THREE.PlaneGeometry(GROUND_SIZE, GROUND_SIZE);
+const groundMat = new THREE.MeshLambertMaterial({ color: 0x556b2f });
+const ground = new THREE.Mesh(groundGeo, groundMat);
+ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+// Load 2x2 OSM tile grid as ground texture
+(function loadGroundTiles() {
+  const tileCanvas = document.createElement('canvas');
+  tileCanvas.width = 512; tileCanvas.height = 512;
+  const ctx = tileCanvas.getContext('2d');
+  let loaded = 0;
+  const tiles = [
+    { x: 52985, y: 32526, dx: 0, dy: 0 },
+    { x: 52986, y: 32526, dx: 256, dy: 0 },
+    { x: 52985, y: 32527, dx: 0, dy: 256 },
+    { x: 52986, y: 32527, dx: 256, dy: 256 },
+  ];
+  tiles.forEach(t => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      ctx.drawImage(img, t.dx, t.dy, 256, 256);
+      if (++loaded === 4) {
+        const tex = new THREE.CanvasTexture(tileCanvas);
+        tex.colorSpace = THREE.SRGBColorSpace;
+        groundMat.map = tex;
+        groundMat.color.set(0xffffff);
+        groundMat.needsUpdate = true;
+      }
+    };
+    img.onerror = () => { loaded++; }; // Keep green fallback
+    img.src = `https://tile.openstreetmap.org/16/${t.x}/${t.y}.png`;
+  });
+})();
+
+// ── Saigon River (east edge) ───────────────────────────────────────
+const riverGeo = new THREE.PlaneGeometry(200, GROUND_SIZE);
+const riverMat = new THREE.MeshLambertMaterial({ color: 0x3a7ca5, transparent: true, opacity: 0.7 });
+const river = new THREE.Mesh(riverGeo, riverMat);
+river.rotation.x = -Math.PI / 2;
+river.position.set(latLonToXZ(CENTER_LAT, 106.7260).x, -0.5, 0);
+scene.add(river);
+
+// ── Building storage for collision ─────────────────────────────────
+const buildingBoxes = []; // { min: {x,z}, max: {x,z} }
+
+function getBuildingColor(h) {
+  if (h > 200) return 0x4060a0;
+  if (h > 60) return 0x7090b0;
+  if (h > 20) return 0xa0b4c8;
+  return 0xc8b89a;
+}
+
+// ── Add a box building ─────────────────────────────────────────────
+function addBoxBuilding(x, z, w, d, h, name) {
+  const geo = new THREE.BoxGeometry(w, h, d);
+  const mat = new THREE.MeshLambertMaterial({ color: getBuildingColor(h) });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(x, h / 2, z);
+  mesh.castShadow = true; mesh.receiveShadow = true;
+  scene.add(mesh);
+  buildingBoxes.push({ min: { x: x - w/2, z: z - d/2 }, max: { x: x + w/2, z: z + d/2 } });
+  if (name) addLabel(name, x, h + 10, z);
+  return mesh;
+}
+
+// ── Label sprite ───────────────────────────────────────────────────
+function addLabel(text, x, y, z) {
+  const c = document.createElement('canvas'); c.width = 512; c.height = 128;
+  const ctx = c.getContext('2d');
+  ctx.font = 'bold 32px Segoe UI, sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  const lines = text.split('\n');
+  lines.forEach((line, i) => { ctx.fillText(line, 257, 50 + i * 36); });
+  ctx.fillStyle = '#fff';
+  lines.forEach((line, i) => { ctx.fillText(line, 256, 49 + i * 36); });
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthTest: false }));
+  sprite.position.set(x, y, z);
+  sprite.scale.set(60, 15, 1);
+  scene.add(sprite);
+}
+
+// ── Landmark 81 (always present) ───────────────────────────────────
+(function createLandmark81() {
+  // Tapered tower body
+  const towerGeo = new THREE.CylinderGeometry(15, 22, 461, 8);
+  const towerMat = new THREE.MeshPhongMaterial({ color: 0xb8c8e0, emissive: 0x102040, shininess: 80 });
+  const tower = new THREE.Mesh(towerGeo, towerMat);
+  tower.position.set(0, 461 / 2, 0);
+  tower.castShadow = true; tower.receiveShadow = true;
+  scene.add(tower);
+  // Antenna spire
+  const antennaGeo = new THREE.BoxGeometry(2, 65, 2);
+  const antenna = new THREE.Mesh(antennaGeo, towerMat);
+  antenna.position.set(0, 461 + 32, 0);
+  antenna.castShadow = true;
+  scene.add(antenna);
+  // Collision box
+  buildingBoxes.push({ min: { x: -25, z: -25 }, max: { x: 25, z: 25 } });
+  // Label
+  addLabel('Landmark 81\n461m', 0, 520, 0);
+})();
+
+// ── Fallback hardcoded buildings ───────────────────────────────────
+const fallbackBuildings = [
+  { x: -120, z: -80, w: 30, d: 30, h: 160, name: 'Park 1' },
+  { x: -160, z: -60, w: 30, d: 30, h: 155, name: 'Park 2' },
+  { x: -190, z: 20, w: 30, d: 30, h: 150, name: 'Park 3' },
+  { x: -170, z: 90, w: 30, d: 30, h: 158, name: 'Park 4' },
+  { x: -130, z: 140, w: 30, d: 30, h: 162, name: 'Park 5' },
+  { x: -80, z: 160, w: 30, d: 30, h: 155, name: 'Park 6' },
+  { x: -240, z: 0, w: 35, d: 35, h: 140, name: 'Central 1' },
+  { x: -280, z: -50, w: 35, d: 35, h: 145, name: 'Central 2' },
+  { x: -290, z: 50, w: 35, d: 35, h: 138, name: 'Central 3' },
+  { x: 80, z: -100, w: 28, d: 28, h: 130, name: 'L1' },
+  { x: 110, z: -50, w: 28, d: 28, h: 135, name: 'L2' },
+  { x: 100, z: 50, w: 28, d: 28, h: 128, name: 'L3' },
+  { x: 70, z: 110, w: 28, d: 28, h: 132, name: 'L4' },
+];
+
+function addFallbacks() {
+  fallbackBuildings.forEach(b => addBoxBuilding(b.x, b.z, b.w, b.d, b.h, b.name));
+}
+
+// ── Fetch buildings from Overpass API ──────────────────────────────
+let buildingCount = 0;
+const hudBldg = document.getElementById('hud-bldg');
+const loadingEl = document.getElementById('loading');
+const errorMsg = document.getElementById('error-msg');
+
+(async function fetchOSMBuildings() {
+  const overpassUrl = 'https://overpass-api.de/api/interpreter';
+  const query = `[out:json][timeout:25];(way["building"](10.7895,106.7165,10.8005,106.7273);relation["building"](10.7895,106.7165,10.8005,106.7273););out body;>;out skel qt;`;
+  try {
+    const resp = await fetch(overpassUrl, { method: 'POST', body: `data=${encodeURIComponent(query)}` });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+
+    // Index nodes by id for coordinate lookup
+    const nodes = {};
+    data.elements.filter(e => e.type === 'node').forEach(n => { nodes[n.id] = n; });
+
+    // Process ways with building tag
+    const ways = data.elements.filter(e => e.type === 'way' && e.tags && e.tags.building);
+    ways.forEach(way => {
+      const coords = (way.nodes || []).map(nid => nodes[nid]).filter(Boolean);
+      if (coords.length < 3) return;
+
+      // Determine height
+      let h = 10;
+      if (way.tags['building:height']) h = parseFloat(way.tags['building:height']) || 10;
+      else if (way.tags['building:levels']) h = (parseFloat(way.tags['building:levels']) || 3) * 3.5;
+      else if (way.tags.height) h = parseFloat(way.tags.height) || 10;
+
+      // Skip if this overlaps Landmark 81 position (we placed it manually)
+      const pts = coords.map(n => latLonToXZ(n.lat, n.lon));
+      const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
+      const cz = pts.reduce((s, p) => s + p.z, 0) / pts.length;
+      if (Math.abs(cx) < 30 && Math.abs(cz) < 30 && h > 100) return;
+
+      // Build extruded shape from polygon
+      try {
+        const shape = new THREE.Shape();
+        shape.moveTo(pts[0].x, pts[0].z);
+        for (let i = 1; i < pts.length; i++) shape.lineTo(pts[i].x, pts[i].z);
+        shape.closePath();
+
+        const extrudeSettings = { depth: h, bevelEnabled: false };
+        const geo = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+        // ExtrudeGeometry extrudes along Z by default; rotate so it goes up (Y)
+        geo.rotateX(-Math.PI / 2);
+
+        const mat = new THREE.MeshLambertMaterial({ color: getBuildingColor(h) });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.castShadow = true; mesh.receiveShadow = true;
+        scene.add(mesh);
+
+        // Collision AABB
+        const xs = pts.map(p => p.x), zs = pts.map(p => p.z);
+        buildingBoxes.push({
+          min: { x: Math.min(...xs), z: Math.min(...zs) },
+          max: { x: Math.max(...xs), z: Math.max(...zs) }
+        });
+        buildingCount++;
+      } catch (e) { /* skip malformed polygon */ }
+    });
+
+    hudBldg.textContent = buildingCount;
+    loadingEl.style.display = 'none';
+  } catch (err) {
+    console.warn('Overpass API failed:', err);
+    errorMsg.textContent = 'OSM data unavailable — showing key landmarks only';
+    errorMsg.style.display = 'block';
+    addFallbacks();
+    buildingCount = fallbackBuildings.length;
+    hudBldg.textContent = buildingCount + ' (fallback)';
+    loadingEl.style.display = 'none';
+  }
+})();
+
+// ── First-person controls ──────────────────────────────────────────
+const velocity = new THREE.Vector3();
+const keys = {};
+let yaw = 0, pitch = 0;
+let locked = false;
+
+document.addEventListener('keydown', e => { keys[e.code] = true; });
+document.addEventListener('keyup', e => { keys[e.code] = false; });
+
+renderer.domElement.addEventListener('click', () => {
+  renderer.domElement.requestPointerLock();
+});
+document.addEventListener('pointerlockchange', () => {
+  locked = !!document.pointerLockElement;
+});
+document.addEventListener('mousemove', e => {
+  if (!locked) return;
+  yaw -= e.movementX * 0.002;
+  pitch -= e.movementY * 0.002;
+  pitch = Math.max(-Math.PI / 2.1, Math.min(Math.PI / 2.1, pitch));
+});
+
+// ── Collision check ────────────────────────────────────────────────
+function checkCollision(x, z) {
+  for (const b of buildingBoxes) {
+    if (x > b.min.x - COLLISION_MARGIN && x < b.max.x + COLLISION_MARGIN &&
+        z > b.min.z - COLLISION_MARGIN && z < b.max.z + COLLISION_MARGIN) return true;
+  }
+  return false;
+}
+
+// ── HUD elements ───────────────────────────────────────────────────
+const hudLat = document.getElementById('hud-lat');
+const hudLon = document.getElementById('hud-lon');
+const hudDir = document.getElementById('hud-dir');
+
+function getCompass(yawVal) {
+  const deg = (((-yawVal * 180 / Math.PI) % 360) + 360) % 360;
+  const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+  return dirs[Math.round(deg / 45) % 8];
+}
+
+// ── WebXR VR ───────────────────────────────────────────────────────
+let inVR = false;
+if (navigator.xr) {
+  navigator.xr.isSessionSupported('immersive-vr').then(ok => {
+    if (!ok) return;
+    const btn = document.getElementById('vr-btn');
+    btn.style.display = 'block';
+    btn.addEventListener('click', () => {
+      navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor'] }).then(session => {
+        renderer.xr.setSession(session);
+        inVR = true;
+        session.addEventListener('end', () => { inVR = false; });
+      });
+    });
+  });
+}
+
+// ── Resize ─────────────────────────────────────────────────────────
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// ── Game loop ──────────────────────────────────────────────────────
+const clock = new THREE.Clock();
+
+renderer.setAnimationLoop(() => {
+  const dt = Math.min(clock.getDelta(), 0.1);
+
+  if (!inVR) {
+    // Movement
+    const speed = keys['ShiftLeft'] || keys['ShiftRight'] ? SPRINT_SPEED : WALK_SPEED;
+    const forward = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
+    const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
+    const move = new THREE.Vector3();
+    if (keys['KeyW']) move.add(forward);
+    if (keys['KeyS']) move.sub(forward);
+    if (keys['KeyD']) move.add(right);
+    if (keys['KeyA']) move.sub(right);
+    if (move.lengthSq() > 0) move.normalize().multiplyScalar(speed * dt);
+
+    const newX = camera.position.x + move.x;
+    const newZ = camera.position.z + move.z;
+    const half = GROUND_SIZE / 2;
+
+    // Collision + bounds
+    if (!checkCollision(newX, camera.position.z) && Math.abs(newX) < half) camera.position.x = newX;
+    if (!checkCollision(camera.position.x, newZ) && Math.abs(newZ) < half) camera.position.z = newZ;
+    camera.position.y = CAM_HEIGHT;
+
+    // Camera rotation
+    camera.quaternion.setFromEuler(new THREE.Euler(pitch, yaw, 0, 'YXZ'));
+
+    // Update HUD
+    const ll = xzToLatLon(camera.position.x, camera.position.z);
+    hudLat.textContent = ll.lat.toFixed(4);
+    hudLon.textContent = ll.lon.toFixed(4);
+    hudDir.textContent = getCompass(yaw);
+  }
+
+  renderer.render(scene, camera);
+});
+</script>
+</body>
+</html>

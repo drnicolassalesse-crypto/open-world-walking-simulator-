@@ -41,10 +41,12 @@
     background: rgba(0,0,0,0.35); backdrop-filter: blur(6px);
     border: 1px solid rgba(255,255,255,0.08);
     border-radius: 10px; padding: 14px 18px;
-    line-height: 1.8; pointer-events: none;
+    line-height: 1.8; pointer-events: auto;
     font-variant-numeric: tabular-nums;
   }
   #hud .label { color: rgba(255,255,255,0.35); }
+  #hud a.map-link { color: #7ec8e3; text-decoration: none; font-size: 11px; pointer-events: auto; }
+  #hud a.map-link:hover { text-decoration: underline; }
 
   #crosshair {
     position: fixed; top: 50%; left: 50%;
@@ -271,6 +273,7 @@
   <span class="label">SND</span> <span id="hud-sound">ON</span><br>
   <span class="label">BEST</span> <span id="hud-best">0</span>
   <div id="stamina-bar"><div id="stamina-fill" style="background:#4CAF50"></div></div>
+  <a class="map-link" href="map.html">🗺 Explore Landmark 81</a>
 </div>
 
 <div id="npc-dialog">
@@ -345,6 +348,7 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.1;
 renderer.xr.enabled = true;
 document.body.appendChild(renderer.domElement);
+renderer.domElement.style.transition = 'filter 2s ease';
 
 // ── WebXR VR Setup ────────────────────────────────────────────────
 let vrSession = null;
@@ -1884,11 +1888,16 @@ const questList = document.getElementById('quest-list');
 
 function getQuests() {
   const specialGemCollected = gems.length > 0 && gems[gems.length - 1].collected;
+  const resTypes = new Set(inventory.filter(i => ['rock','leaf','flower'].includes(i.type)).map(i => i.type));
+  const nightHours = Math.min(nightMinutes / 5, 5); // 5 real min = 1 in-game hour
   return [
     { name: 'Gem Hunter', desc: 'Collect all 15 gems', cur: gemsCollected, max: 15, done: gemsCollected >= 15 },
     { name: 'The Special One', desc: 'Find the floating island gem', cur: specialGemCollected ? 1 : 0, max: 1, done: specialGemCollected },
     { name: 'Treasure Hunter', desc: 'Open the treasure chest', cur: chestOpened ? 1 : 0, max: 1, done: chestOpened },
     { name: 'Master Angler', desc: 'Catch 3 fish', cur: Math.min(fishCaught, 3), max: 3, done: fishCaught >= 3 },
+    { name: 'Seasonal Wanderer', desc: 'Visit all 4 seasons', cur: seasonsVisited.size, max: 4, done: seasonsVisited.size >= 4 },
+    { name: 'Resource Collector', desc: 'Collect 1 rock, 1 leaf, 1 flower', cur: resTypes.size, max: 3, done: resTypes.size >= 3 },
+    { name: 'Night Explorer', desc: 'Spend 5 in-game hours at night', cur: Math.floor(nightHours), max: 5, done: nightHours >= 5 },
   ];
 }
 
@@ -1897,7 +1906,7 @@ function renderQuestLog() {
   for (const q of getQuests()) {
     const pct = Math.min(100, (q.cur / q.max) * 100);
     const status = q.done ? 'complete' : 'active';
-    questList.innerHTML += `<div class="quest-item"><span class="quest-name">${q.name}</span><span class="quest-status ${status}">${q.done ? 'Complete' : 'Active'}</span><div class="quest-desc">${q.desc} (${q.cur}/${q.max})</div><div class="quest-bar"><div class="quest-bar-fill" style="width:${pct}%;background:${q.done ? '#FFD700' : '#4CAF50'}"></div></div></div>`;
+    questList.innerHTML += `<div class="quest-item"><span class="quest-name">${q.done ? '✅ ' : ''}${q.name}</span><span class="quest-status ${status}">${q.done ? 'Complete' : 'Active'}</span><div class="quest-desc">${q.desc} (${q.cur}/${q.max})</div><div class="quest-bar"><div class="quest-bar-fill" style="width:${pct}%;background:${q.done ? '#FFD700' : '#4CAF50'}"></div></div></div>`;
   }
 }
 
@@ -2777,6 +2786,19 @@ function animate() {
   // Achievements
   totalDist+=Math.sqrt(velocity.x*velocity.x+velocity.z*velocity.z)*dt;
   {const isN=timeOfDay>0.85||timeOfDay<0.25;if(isN){nightMinutes+=dt/60;}if(isN&&!wasNight)nightCount++;wasNight=isN;} checkAchievements();
+  // Post-processing CSS filters (skip in VR)
+  if (!inVR) {
+    const t = timeOfDay, df = THREE.MathUtils.clamp(Math.sin((t - 0.25) * Math.PI * 2) * 3, 0, 1);
+    const distSR = Math.abs(t - 0.25), distSS = Math.abs(t - 0.75);
+    const sf = Math.max(1 - distSR / 0.06, 1 - distSS / 0.06, 0);
+    let f = '';
+    if (sf > 0.3) f = 'sepia(0.15) hue-rotate(-10deg)';
+    else if (weather === 'rain') f = 'saturate(0.85) brightness(0.95)';
+    else if (currentSeason === 'winter' && snowActive) f = 'hue-rotate(15deg) brightness(1.05)';
+    else if (df < 0.1) f = 'brightness(0.85)';
+    else if (df > 0.9 && currentSeason === 'summer') f = 'brightness(1.05) saturate(1.1)';
+    renderer.domElement.style.filter = f;
+  }
   // Survival score & auto-save
   survivalTimer += dt;
   saveTimer += dt;
