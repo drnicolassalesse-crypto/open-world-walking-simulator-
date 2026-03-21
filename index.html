@@ -348,7 +348,7 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.1;
 renderer.xr.enabled = true;
 document.body.appendChild(renderer.domElement);
-renderer.domElement.style.transition = 'filter 2s ease';
+Object.assign(renderer.domElement.style, { position:'fixed', top:'0', left:'0', zIndex:'0', transition:'filter 2s ease' });
 
 // ── WebXR VR Setup ────────────────────────────────────────────────
 let vrSession = null;
