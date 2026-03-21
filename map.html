@@ -52,6 +52,20 @@
     background: rgba(180,80,20,0.8); color: #fff; padding: 8px 16px;
     border-radius: 6px; font-size: 12px; display: none;
   }
+  #npc-dialog {
+    position: fixed; bottom: 60px; left: 50%; transform: translateX(-50%); z-index: 60;
+    background: rgba(0,0,0,0.75); backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,0.15); border-radius: 10px;
+    padding: 14px 22px; color: #fff; max-width: 420px; display: none; text-align: center;
+  }
+  #npc-dialog .npc-name { font-weight: bold; color: #7ec8e3; font-size: 14px; margin-bottom: 4px; }
+  #npc-dialog .npc-msg { font-size: 13px; line-height: 1.5; }
+  #npc-dialog .dismiss { font-size: 10px; color: rgba(255,255,255,0.4); margin-top: 6px; }
+  .npc-label {
+    position: absolute; color: #fff; font-size: 12px; font-weight: bold;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.8); pointer-events: none;
+    transform: translate(-50%, -100%); white-space: nowrap;
+  }
 </style>
 </head>
 <body>
@@ -66,6 +80,8 @@
   <a href="index.html">← Back to main game</a>
 </div>
 <div id="error-msg"></div>
+<div id="npc-dialog"><div class="npc-name" id="npc-name"></div><div class="npc-msg" id="npc-msg"></div><div class="dismiss">Click or press E to dismiss</div></div>
+<div id="npc-labels"></div>
 <button id="vr-btn">Enter VR</button>
 
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.163.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.163.0/examples/jsm/"}}</script>
@@ -387,6 +403,72 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
+// ── NPC Tour Guides ────────────────────────────────────────────────
+const npcDefs = [
+  { name: 'Linh', color: 0xe84393, lat: 10.7950, lon: 106.7219,
+    msg: 'Welcome! Landmark 81 is Vietnam\'s tallest building at 461m. Built in 2018!' },
+  { name: 'Minh', color: 0x0984e3, lat: 10.7940, lon: 106.7200,
+    msg: 'This is Vinhomes Central Park, a premium residential complex with beautiful gardens.' },
+  { name: 'Thu', color: 0x00b894, lat: 10.7960, lon: 106.7230,
+    msg: 'The Saigon River runs along here. It connects Ho Chi Minh City to the sea!' },
+];
+const npcs = [];
+const npcDialog = document.getElementById('npc-dialog');
+const npcNameEl = document.getElementById('npc-name');
+const npcMsgEl = document.getElementById('npc-msg');
+const npcLabelsContainer = document.getElementById('npc-labels');
+let dialogOpen = false, activeNPC = null;
+
+function createNPC(def) {
+  const pos = latLonToXZ(def.lat, def.lon);
+  if (Math.abs(pos.x) < 30 && Math.abs(pos.z) < 30) { pos.x = 30; pos.z = 5; } // avoid tower
+  const group = new THREE.Group();
+  group.position.set(pos.x, 0, pos.z);
+  const bMat = new THREE.MeshLambertMaterial({ color: def.color });
+  const lMat = new THREE.MeshLambertMaterial({ color: 0x444444 });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.7, 0.3), bMat); body.position.y = 0.75; group.add(body);
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.35, 0.35), bMat); head.position.y = 1.3; group.add(head);
+  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.5, 0.2), lMat); legL.position.set(-0.12, 0.25, 0); group.add(legL);
+  const legR = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.5, 0.2), lMat); legR.position.set(0.12, 0.25, 0); group.add(legR);
+  group.castShadow = true; scene.add(group);
+  const label = document.createElement('div'); label.className = 'npc-label';
+  label.textContent = def.name; label.style.color = '#' + def.color.toString(16).padStart(6, '0');
+  npcLabelsContainer.appendChild(label);
+  return { group, def, pos, label };
+}
+npcDefs.forEach(d => npcs.push(createNPC(d)));
+
+function showNPCDialog(npc) {
+  npcNameEl.textContent = npc.def.name;
+  npcMsgEl.textContent = npc.def.msg;
+  npcDialog.style.display = 'block';
+  dialogOpen = true; activeNPC = npc;
+  document.exitPointerLock();
+}
+function dismissDialog() {
+  if (!dialogOpen) return;
+  npcDialog.style.display = 'none';
+  dialogOpen = false; activeNPC = null;
+  renderer.domElement.requestPointerLock();
+}
+document.addEventListener('click', () => { if (dialogOpen) dismissDialog(); });
+document.addEventListener('keydown', e => {
+  if (e.code === 'KeyE' && dialogOpen) dismissDialog();
+});
+
+// Project NPC label positions from 3D to 2D
+function updateNPCLabels() {
+  const w2 = window.innerWidth / 2, h2 = window.innerHeight / 2;
+  npcs.forEach(npc => {
+    const headPos = new THREE.Vector3(npc.pos.x, 1.7, npc.pos.z);
+    headPos.project(camera);
+    if (headPos.z > 1 || headPos.z < -1) { npc.label.style.display = 'none'; return; }
+    npc.label.style.display = 'block';
+    npc.label.style.left = (headPos.x * w2 + w2) + 'px';
+    npc.label.style.top = (-headPos.y * h2 + h2) + 'px';
+  });
+}
+
 // ── Game loop ──────────────────────────────────────────────────────
 const clock = new THREE.Clock();
 
@@ -422,6 +504,18 @@ renderer.setAnimationLoop(() => {
     hudLat.textContent = ll.lat.toFixed(4);
     hudLon.textContent = ll.lon.toFixed(4);
     hudDir.textContent = getCompass(yaw);
+
+    // NPC animation + proximity check
+    let nearest = null, nearDist = Infinity;
+    npcs.forEach(npc => {
+      npc.group.rotation.y += 0.5 * dt;
+      npc.group.children.forEach(c => { c.position.y += Math.sin(clock.elapsedTime * 2) * 0.001; });
+      const dx = camera.position.x - npc.pos.x, dz = camera.position.z - npc.pos.z;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+      if (dist < 8 && dist < nearDist) { nearest = npc; nearDist = dist; }
+    });
+    if (nearest && !dialogOpen) showNPCDialog(nearest);
+    updateNPCLabels();
   }
 
   renderer.render(scene, camera);
