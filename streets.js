@@ -139,12 +139,25 @@
 
   async function fetchOSMRoads() {
     const url = 'https://overpass-api.de/api/interpreter';
-    const resp = await fetch(url, {
-      method: 'POST',
-      body: `data=${encodeURIComponent(buildQuery())}`,
-    });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    return resp.json();
+    // Retry with backoff — Overpass API rate-limits concurrent requests
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) await new Promise(r => setTimeout(r, 2000 * attempt));
+      try {
+        const resp = await fetch(url, {
+          method: 'POST',
+          body: `data=${encodeURIComponent(buildQuery())}`,
+        });
+        if (resp.status === 429) {
+          console.warn(`[Streets] Overpass rate-limited (attempt ${attempt + 1}/3), retrying...`);
+          continue;
+        }
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        return resp.json();
+      } catch (err) {
+        if (attempt === 2) throw err;
+        console.warn(`[Streets] Fetch attempt ${attempt + 1} failed:`, err.message);
+      }
+    }
   }
 
   // ── Geometry builders ─────────────────────────────────────────────
@@ -350,6 +363,61 @@
     }
   }
 
+  // ── Fallback hardcoded streets (when API fails) ────────────────────
+  function buildFallbackStreets(THREE, scene, latLonToXZ, roadMat, narrowMat, sidewalkMat, curbMat, footpathMat) {
+    console.log('[Streets] Building fallback street grid');
+    // Major roads in the Landmark 81 area (approximate real layout)
+    const roads = [
+      // Nguyen Huu Canh (main north-south) — primary, wide
+      { pts: [[-200, -500], [-200, -200], [-190, 0], [-180, 200], [-170, 500]], w: 9 },
+      // Xa Lo Ha Noi (highway to the north) — trunk
+      { pts: [[-400, -350], [-200, -300], [0, -280], [200, -260], [500, -250]], w: 11 },
+      // Nguyen Luong Bang / D1 (east-west near LM81)
+      { pts: [[-400, -50], [-200, -40], [0, -30], [200, -20], [400, -10]], w: 8 },
+      // Vo Nguyen Giap / D2 (east-west south of LM81)
+      { pts: [[-300, 150], [-100, 140], [0, 130], [150, 120], [350, 110]], w: 7 },
+      // Local road north of LM81
+      { pts: [[-100, -200], [0, -180], [100, -170], [200, -160]], w: 6 },
+      // Local road east side
+      { pts: [[100, -300], [110, -100], [120, 50], [130, 200]], w: 5 },
+      // Pedestrian path near river
+      { pts: [[250, -400], [260, -200], [270, 0], [280, 200], [290, 400]], w: 2.5 },
+      // Small street west
+      { pts: [[-350, -200], [-340, 0], [-330, 200]], w: 5 },
+    ];
+
+    for (const road of roads) {
+      const pts = road.pts.map(([x, z]) => ({ x, z }));
+      const halfW = road.w / 2;
+      const isNarrow = road.w < 4;
+      const mat = isNarrow ? footpathMat : (road.w >= 6 ? roadMat : narrowMat);
+
+      const mesh = buildRibbon(THREE, pts, halfW, ROAD_Y, mat);
+      if (mesh) scene.add(mesh);
+
+      // Add sidewalks for wider roads
+      if (road.w >= 5) {
+        for (const side of [1, -1]) {
+          const swPts = pts.map((p, i) => {
+            let dx = 0, dz = 0;
+            if (i < pts.length - 1) { dx += pts[i + 1].x - p.x; dz += pts[i + 1].z - p.z; }
+            if (i > 0) { dx += p.x - pts[i - 1].x; dz += p.z - pts[i - 1].z; }
+            const len = Math.sqrt(dx * dx + dz * dz) || 1;
+            const nx = -dz / len * side, nz = dx / len * side;
+            return { x: p.x + nx * (halfW + SIDEWALK_W / 2 + 0.15), z: p.z + nz * (halfW + SIDEWALK_W / 2 + 0.15) };
+          });
+          const sw = buildRibbon(THREE, swPts, SIDEWALK_W / 2, SIDEWALK_Y, sidewalkMat);
+          if (sw) scene.add(sw);
+        }
+        // Curbs
+        const lc = buildCurb(THREE, pts, halfW, 1, curbMat);
+        if (lc) scene.add(lc);
+        const rc = buildCurb(THREE, pts, halfW, -1, curbMat);
+        if (rc) scene.add(rc);
+      }
+    }
+  }
+
   // ── Main build function ───────────────────────────────────────────
   async function build(THREE, scene, latLonToXZ, onProgress) {
     // Create reusable materials
@@ -380,12 +448,16 @@
 
     const footpathMat = new THREE.MeshStandardMaterial({ color: 0xa09888, roughness: 0.85 });
 
+    console.log('[Streets] Fetching OSM road data...');
     let data;
     try {
       data = await fetchOSMRoads();
+      console.log('[Streets] OSM data received:', data.elements.length, 'elements');
     } catch (err) {
-      console.warn('Street data fetch failed:', err);
+      console.warn('[Streets] OSM fetch failed, using fallback streets:', err);
       if (onProgress) onProgress('streets-error');
+      // Build fallback streets so there's always something visible
+      buildFallbackStreets(THREE, scene, latLonToXZ, roadMat, narrowMat, sidewalkMat, curbMat, footpathMat);
       return { lamps: [], roadCount: 0, shopCount: 0 };
     }
 
@@ -525,6 +597,11 @@
       shopCount++;
     }
 
+    console.log(`[Streets] Built: ${roadCount} roads, ${lamps.length} lamps, ${benchCount} benches, ${shopCount} shops, ${mergedIntersections.length} crosswalks`);
+    if (roadCount === 0) {
+      console.warn('[Streets] No roads from OSM data, adding fallback streets');
+      buildFallbackStreets(THREE, scene, latLonToXZ, roadMat, narrowMat, sidewalkMat, curbMat, footpathMat);
+    }
     if (onProgress) onProgress('streets-done');
     return { lamps, roadCount, shopCount };
   }
