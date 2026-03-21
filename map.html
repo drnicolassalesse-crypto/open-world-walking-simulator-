@@ -34,13 +34,25 @@
   }
   #loading {
     position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-    background: rgba(0,0,0,0.8); z-index: 100;
+    background: #0a0a1e; z-index: 200;
     display: flex; align-items: center; justify-content: center;
-    flex-direction: column; color: #fff; font-size: 18px;
+    flex-direction: column; color: #fff; font-size: 18px; transition: opacity 0.8s;
   }
   #loading .spinner { width: 40px; height: 40px; border: 3px solid rgba(255,255,255,0.2); border-top-color: #7ec8e3; border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 16px; }
   @keyframes spin { to { transform: rotate(360deg); } }
   #loading .sub { font-size: 12px; color: rgba(255,255,255,0.5); margin-top: 8px; }
+  #loading .flag { color: #da251d; font-size: 22px; font-weight: bold; margin-top: 14px; letter-spacing: 4px; }
+  #loading .flag-emoji { font-size: 28px; margin-top: 6px; }
+  #load-bar-wrap { width: 200px; height: 4px; background: rgba(255,255,255,0.15); border-radius: 2px; margin-top: 14px; }
+  #load-bar { width: 0%; height: 100%; background: #da251d; border-radius: 2px; transition: width 0.3s; }
+  #welcome {
+    position: fixed; top: 35%; left: 50%; transform: translate(-50%,-50%); z-index: 150;
+    background: rgba(0,0,0,0.75); backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 12px; padding: 24px 36px; color: #fff; text-align: center;
+    display: none; transition: opacity 0.5s;
+  }
+  #welcome h3 { color: #FFD700; font-size: 18px; margin-bottom: 10px; }
+  #welcome p { font-size: 13px; line-height: 1.7; color: rgba(255,255,255,0.8); margin: 0; }
   #vr-btn {
     position: fixed; bottom: 20px; right: 20px; z-index: 50;
     padding: 10px 20px; background: rgba(0,0,0,0.6); color: #fff;
@@ -94,7 +106,8 @@
 </style>
 </head>
 <body>
-<div id="loading"><div class="spinner"></div>Loading buildings...<div class="sub">Fetching OpenStreetMap data</div></div>
+<div id="loading"><div class="spinner"></div>Loading Landmark 81 Area...<div class="sub">Fetching OpenStreetMap data</div><div id="load-bar-wrap"><div id="load-bar"></div></div><div class="flag">VIETNAM</div><div class="flag-emoji">🇻🇳</div></div>
+<div id="welcome"><h3>Welcome to Landmark 81, Ho Chi Minh City!</h3><p>WASD to move, mouse to look, E to talk to NPCs<br>Collect items, take photos, earn score!</p></div>
 <div id="title">Landmark 81 Area — Ho Chi Minh City<small>Click to explore · WASD to move · Shift to sprint</small></div>
 <div id="crosshair"></div>
 <div id="hud">
@@ -386,7 +399,21 @@ function addFallbacks() {
 let buildingCount = 0;
 const hudBldg = document.getElementById('hud-bldg');
 const loadingEl = document.getElementById('loading');
+const loadBar = document.getElementById('load-bar');
+const welcomeEl = document.getElementById('welcome');
 const errorMsg = document.getElementById('error-msg');
+let loadDismissed = false;
+
+function dismissLoading() {
+  if (loadDismissed) return; loadDismissed = true;
+  loadBar.style.width = '100%';
+  setTimeout(() => { loadingEl.style.opacity = '0'; }, 300);
+  setTimeout(() => { loadingEl.style.display = 'none'; welcomeEl.style.display = 'block'; welcomeEl.style.opacity = '1'; }, 1100);
+  setTimeout(() => { welcomeEl.style.opacity = '0'; }, 4100);
+  setTimeout(() => { welcomeEl.style.display = 'none'; }, 4600);
+}
+// Fallback: dismiss after 3 seconds even if fetch is slow
+setTimeout(dismissLoading, 3000);
 
 (async function fetchOSMBuildings() {
   const overpassUrl = 'https://overpass-api.de/api/interpreter';
@@ -442,11 +469,13 @@ const errorMsg = document.getElementById('error-msg');
           max: { x: Math.max(...xs), z: Math.max(...zs) }
         });
         buildingCount++;
+        if (buildingCount % 20 === 0) loadBar.style.width = Math.min(75, buildingCount / 2) + '%';
       } catch (e) { /* skip malformed polygon */ }
     });
 
     hudBldg.textContent = buildingCount;
-    loadingEl.style.display = 'none';
+    loadBar.style.width = '80%';
+    dismissLoading();
   } catch (err) {
     console.warn('Overpass API failed:', err);
     errorMsg.textContent = 'OSM data unavailable — showing key landmarks only';
@@ -454,7 +483,7 @@ const errorMsg = document.getElementById('error-msg');
     addFallbacks();
     buildingCount = fallbackBuildings.length;
     hudBldg.textContent = buildingCount + ' (fallback)';
-    loadingEl.style.display = 'none';
+    dismissLoading();
   }
 })();
 
