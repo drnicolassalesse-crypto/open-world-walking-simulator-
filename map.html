@@ -79,6 +79,7 @@
   #photo-flash { position:fixed;top:0;left:0;width:100%;height:100%;background:#fff;z-index:200;opacity:0;pointer-events:none;transition:opacity 0.15s; }
   #photo-prompt { position:fixed;bottom:120px;left:50%;transform:translateX(-50%);z-index:55;color:#FFD700;font-size:14px;font-weight:bold;text-shadow:0 1px 3px #000;display:none;pointer-events:none; }
   #photo-toast { position:fixed;top:70px;left:50%;transform:translateX(-50%);z-index:55;background:rgba(0,0,0,0.7);color:#FFD700;padding:8px 18px;border-radius:8px;font-size:13px;display:none;pointer-events:none; }
+  #achieve-popup { position:fixed;top:40%;left:50%;transform:translate(-50%,-50%);z-index:90;color:#FFD700;font-size:28px;font-weight:bold;text-shadow:0 2px 8px rgba(0,0,0,0.8);pointer-events:none;display:none;text-align:center;transition:opacity 0.5s; }
 </style>
 </head>
 <body>
@@ -92,6 +93,7 @@
   <span class="label">BLDG</span> <span id="hud-bldg">0</span><br>
   <span class="label">TIME</span> <span id="hud-time">7:00 AM</span><br>
   <span class="label">SKY</span> <span id="hud-weather">☀️ Clear</span><br>
+  <span style="color:#FFD700" id="hud-score">SCORE: 0</span><br>
   <span id="hud-items">🌿 Items: 0/8</span> · <span id="hud-photos">📸 Photos: 0/3</span><br>
   <a href="index.html">← Back to main game</a>
   <div id="hud-vr" style="display:none;color:#7ec8e3;margin-top:4px;font-weight:bold">🥽 VR Mode Active</div>
@@ -104,6 +106,7 @@
 <div id="photo-flash"></div>
 <div id="photo-prompt">Press F to take photo</div>
 <div id="photo-toast"></div>
+<div id="achieve-popup"></div>
 <button id="vr-btn">Enter VR</button>
 
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.163.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.163.0/examples/jsm/"}}</script>
@@ -625,6 +628,7 @@ function showNPCDialog(npc) {
   npcMsgEl.textContent = npc.def.msg;
   npcDialog.style.display = 'block';
   dialogOpen = true; activeNPC = npc;
+  if (!npcsScored.has(npc.def.name)) { npcsScored.add(npc.def.name); addScore(15); }
   document.exitPointerLock();
 }
 function dismissDialog() {
@@ -698,8 +702,32 @@ function updateCollectibles(dt) {
       c.mesh.material.transparent = true;
       itemsCollected++;
       hudItems.textContent = `🌿 Items: ${itemsCollected}/8`;
+      addScore(10);
     }
   });
+}
+
+// ── Score & Achievements ───────────────────────────────────────────
+let score = 0;
+const hudScore = document.getElementById('hud-score');
+const achievePopup = document.getElementById('achieve-popup');
+const milestones = [{ pts: 50, name: 'Explorer!' }, { pts: 100, name: 'Adventurer!' }, { pts: 200, name: 'Ho Chi Minh City Expert!' }];
+const milestonesHit = new Set();
+const npcsScored = new Set();
+let lm81Scored = false;
+
+function addScore(pts) {
+  score += pts;
+  hudScore.textContent = `SCORE: ${score}`;
+  for (const m of milestones) {
+    if (score >= m.pts && !milestonesHit.has(m.pts)) {
+      milestonesHit.add(m.pts);
+      achievePopup.textContent = m.name;
+      achievePopup.style.display = 'block'; achievePopup.style.opacity = '1';
+      setTimeout(() => { achievePopup.style.opacity = '0'; }, 2500);
+      setTimeout(() => { achievePopup.style.display = 'none'; }, 3000);
+    }
+  }
 }
 
 // ── Photo Spots ────────────────────────────────────────────────────
@@ -729,6 +757,7 @@ function takePhoto(spot) {
   if (photosTaken.has(spot.def.name)) return;
   photosTaken.add(spot.def.name);
   hudPhotos.textContent = `📸 Photos: ${photosTaken.size}/3`;
+  addScore(25);
   // Flash
   photoFlash.style.opacity = '1';
   setTimeout(() => { photoFlash.style.opacity = '0'; }, 150);
@@ -841,6 +870,11 @@ renderer.setAnimationLoop(() => {
     hudLat.textContent = ll.lat.toFixed(4);
     hudLon.textContent = ll.lon.toFixed(4);
     hudDir.textContent = getCompass(yaw);
+
+    // Landmark 81 proximity bonus
+    if (!lm81Scored && Math.sqrt(camera.position.x ** 2 + camera.position.z ** 2) < 20) {
+      lm81Scored = true; addScore(50);
+    }
 
     // NPC animation + proximity check
     let nearest = null, nearDist = Infinity;
