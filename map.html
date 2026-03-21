@@ -177,6 +177,7 @@
 </div>
 <button id="vr-btn">Enter VR</button>
 
+<script src="textures.js"></script>
 <script src="map-systems.js"></script>
 <script src="landmarks.js"></script>
 <script src="vr-hands.js"></script>
@@ -184,6 +185,10 @@
 <script type="module">
 import * as THREE from 'three';
 window._THREE = THREE; // expose for map-systems.js
+
+// ── Initialize Texture System ───────────────────────────────────────
+const TX = window.MapTextures;
+TX.initTextures();
 
 // ── Constants ──────────────────────────────────────────────────────
 const CENTER_LAT = 10.7950, CENTER_LON = 106.7219;
@@ -342,9 +347,13 @@ ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground)
   });
 })();
 
-// ── Saigon River (east edge) ───────────────────────────────────────
-const river = new THREE.Mesh(new THREE.PlaneGeometry(200, GROUND_SIZE), new THREE.MeshLambertMaterial({ color: 0x3a7ca5, transparent: true, opacity: 0.7 }));
+// ── Saigon River with water shader ──────────────────────────────────
+const waterMat = TX.createWaterMaterial(THREE);
+const river = new THREE.Mesh(new THREE.PlaneGeometry(200, GROUND_SIZE, 20, 20), waterMat);
 river.rotation.x = -Math.PI / 2; river.position.set(latLonToXZ(CENTER_LAT, 106.7260).x, -0.5, 0); scene.add(river);
+
+// ── Roads, sidewalks, and green spaces ─────────────────────────────
+TX.addRoads(THREE, scene, latLonToXZ);
 
 // ── Building storage for collision ─────────────────────────────────
 const buildingBoxes = []; // { min: {x,z}, max: {x,z} }
@@ -359,7 +368,7 @@ function getBuildingColor(h) {
 // ── Add a box building ─────────────────────────────────────────────
 function addBoxBuilding(x, z, w, d, h, name) {
   const geo = new THREE.BoxGeometry(w, h, d);
-  const mat = new THREE.MeshLambertMaterial({ color: getBuildingColor(h) });
+  const mat = TX.getBuildingMaterial(THREE, h, false).clone();
   const mesh = new THREE.Mesh(geo, mat);
   mesh.position.set(x, h / 2, z);
   mesh.castShadow = true; mesh.receiveShadow = true;
@@ -388,9 +397,9 @@ function addLabel(text, x, y, z) {
 
 // ── Landmark 81 (always present) ───────────────────────────────────
 (function createLandmark81() {
-  // Tapered tower body
+  // Tapered tower body with glass texture
   const towerGeo = new THREE.CylinderGeometry(15, 22, 461, 8);
-  const towerMat = new THREE.MeshPhongMaterial({ color: 0xb8c8e0, emissive: 0x102040, shininess: 80 });
+  const towerMat = TX.getBuildingMaterial(THREE, 461, true);
   const tower = new THREE.Mesh(towerGeo, towerMat);
   tower.position.set(0, 461 / 2, 0);
   tower.castShadow = true; tower.receiveShadow = true;
@@ -490,7 +499,8 @@ setTimeout(dismissLoading, 3000);
         // ExtrudeGeometry extrudes along Z by default; rotate so it goes up (Y)
         geo.rotateX(-Math.PI / 2);
 
-        const mat = new THREE.MeshLambertMaterial({ color: getBuildingColor(h) });
+        const mat = TX.getBuildingMaterial(THREE, h, false).clone();
+        TX.applyBuildingUVs(geo, h);
         const mesh = new THREE.Mesh(geo, mat);
         mesh.castShadow = true; mesh.receiveShadow = true;
         scene.add(mesh);
@@ -794,6 +804,8 @@ renderer.setAnimationLoop((timestamp, xrFrame) => {
   const dt = Math.min(clock.getDelta(), 0.1);
   updateDayNight(dt);
   updateWeather(dt);
+  // Update water shader time
+  if (waterMat.uniforms) waterMat.uniforms.uTime.value = clock.elapsedTime;
 
   if (!inVR) {
     // Movement
