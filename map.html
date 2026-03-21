@@ -92,7 +92,7 @@
   <span class="label">BLDG</span> <span id="hud-bldg">0</span><br>
   <span class="label">TIME</span> <span id="hud-time">7:00 AM</span><br>
   <span class="label">SKY</span> <span id="hud-weather">☀️ Clear</span><br>
-  <span id="hud-photos">📸 Photos: 0/3</span><br>
+  <span id="hud-items">🌿 Items: 0/8</span> · <span id="hud-photos">📸 Photos: 0/3</span><br>
   <a href="index.html">← Back to main game</a>
 </div>
 <div id="error-msg"></div>
@@ -611,6 +611,57 @@ function updateNPCLabels() {
   });
 }
 
+// ── Collectible Cultural Items ──────────────────────────────────────
+const collectibleDefs = [
+  { name:'Lotus Flower', color:0xff69b4, lat:10.7938, lon:106.7198 },
+  { name:'Lotus Flower', color:0xff69b4, lat:10.7955, lon:106.7228 },
+  { name:'Banh Mi', color:0x8b5a2b, lat:10.7945, lon:106.7210 },
+  { name:'Banh Mi', color:0x8b5a2b, lat:10.7952, lon:106.7215 },
+  { name:'Non La Hat', color:0xe8d44d, lat:10.7942, lon:106.7222 },
+  { name:'Non La Hat', color:0xe8d44d, lat:10.7948, lon:106.7205 },
+  { name:'Coffee Cup', color:0x3e2723, lat:10.7958, lon:106.7212 },
+  { name:'Coffee Cup', color:0x3e2723, lat:10.7935, lon:106.7225 },
+];
+const collectibles = [];
+let itemsCollected = 0;
+const hudItems = document.getElementById('hud-items');
+
+collectibleDefs.forEach(def => {
+  const p = latLonToXZ(def.lat, def.lon);
+  const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.4, 12, 8),
+    new THREE.MeshStandardMaterial({ color: def.color, emissive: def.color, emissiveIntensity: 0.4 }));
+  mesh.position.set(p.x, 0.5, p.z);
+  scene.add(mesh);
+  collectibles.push({ def, pos: p, mesh, collected: false, fadeTimer: -1 });
+});
+
+function updateCollectibles(dt) {
+  collectibles.forEach(c => {
+    if (c.collected) {
+      if (c.fadeTimer >= 0) {
+        c.fadeTimer += dt;
+        const t = c.fadeTimer / 0.3;
+        const s = 1 + t * 0.5;
+        c.mesh.scale.set(s, s, s);
+        c.mesh.material.opacity = 1 - t;
+        if (t >= 1) { scene.remove(c.mesh); c.fadeTimer = -1; }
+      }
+      return;
+    }
+    // Bob + spin
+    c.mesh.position.y = 0.5 + Math.sin(clock.elapsedTime * Math.PI * 2) * 0.5;
+    c.mesh.rotation.y += 1.5 * dt;
+    // Auto-collect at 2m
+    const dx = camera.position.x - c.pos.x, dz = camera.position.z - c.pos.z;
+    if (Math.sqrt(dx * dx + dz * dz) < 2) {
+      c.collected = true; c.fadeTimer = 0;
+      c.mesh.material.transparent = true;
+      itemsCollected++;
+      hudItems.textContent = `🌿 Items: ${itemsCollected}/8`;
+    }
+  });
+}
+
 // ── Photo Spots ────────────────────────────────────────────────────
 const photoSpotDefs = [
   { name: 'Landmark 81 View', lat: 10.7935, lon: 106.7215 },
@@ -683,6 +734,13 @@ function drawMinimap() {
     const p = worldToMM(npc.pos.x, npc.pos.z);
     mm.fillStyle = '#' + npc.def.color.toString(16).padStart(6, '0');
     mm.beginPath(); mm.arc(p.mx, p.my, 2, 0, Math.PI * 2); mm.fill();
+  });
+  // Collectible dots
+  collectibles.forEach(c => {
+    if (c.collected) return;
+    const p = worldToMM(c.pos.x, c.pos.z);
+    mm.fillStyle = '#' + c.def.color.toString(16).padStart(6, '0');
+    mm.beginPath(); mm.arc(p.mx, p.my, 1.5, 0, Math.PI * 2); mm.fill();
   });
   // Player triangle indicating direction
   const pp = worldToMM(camera.position.x, camera.position.z);
@@ -763,6 +821,7 @@ renderer.setAnimationLoop(() => {
       if (Math.sqrt(dx * dx + dz * dz) < 6 && !photosTaken.has(s.def.name)) nearPhotoSpot = s;
     });
     photoPrompt.style.display = nearPhotoSpot ? 'block' : 'none';
+    updateCollectibles(dt);
     drawMinimap();
     drawCompass();
   }
