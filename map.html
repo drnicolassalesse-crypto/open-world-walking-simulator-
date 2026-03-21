@@ -90,6 +90,7 @@
   #info-panel .fact em { color:rgba(255,255,255,0.5);font-style:normal;font-size:12px; }
   #info-close { position:absolute;top:10px;right:14px;background:none;border:none;color:#fff;font-size:22px;cursor:pointer; }
   #info-close:hover { color:#da251d; }
+  #sound-btn { position:fixed;top:56px;right:16px;z-index:50;padding:6px 12px;background:rgba(0,0,0,0.5);color:#fff;border:1px solid rgba(255,255,255,0.2);border-radius:6px;cursor:pointer;font-size:12px; }
 </style>
 </head>
 <body>
@@ -117,6 +118,7 @@
 <div id="photo-prompt">Press F to take photo</div>
 <div id="photo-toast"></div>
 <div id="achieve-popup"></div>
+<button id="sound-btn">🔊 Sound: OFF</button>
 <button id="info-btn">Area Info</button>
 <div id="info-overlay">
   <div id="info-panel">
@@ -268,7 +270,7 @@ let weatherIdx = 0, weatherTimer = 0;
 
 function updateWeather(dt) {
   weatherTimer += dt;
-  if (weatherTimer >= weatherCycle[weatherIdx].dur) { weatherTimer = 0; weatherIdx = (weatherIdx + 1) % weatherCycle.length; hudWeather.textContent = weatherCycle[weatherIdx].icon + ' ' + weatherCycle[weatherIdx].name; }
+  if (weatherTimer >= weatherCycle[weatherIdx].dur) { weatherTimer = 0; weatherIdx = (weatherIdx + 1) % weatherCycle.length; hudWeather.textContent = weatherCycle[weatherIdx].icon + ' ' + weatherCycle[weatherIdx].name; if (typeof updateAudioWeather === 'function') updateAudioWeather(weatherIdx); }
   const wc = weatherCycle[weatherIdx]; rainMesh.visible = wc.count > 0;
   if (!rainMesh.visible) { scene.fog.density = 0.0008; return; }
   const pos = rainGeo.attributes.position.array, cx = camera.position.x, cz = camera.position.z;
@@ -629,6 +631,59 @@ function drawCompass() {
   comp.fillStyle = '#fff'; comp.beginPath(); comp.arc(0, 0, 2, 0, Math.PI * 2); comp.fill();
   comp.restore();
 }
+
+// ── Procedural Ambient Sound System ────────────────────────────────
+let audioCtx = null, masterGain = null, cityGain, windGain, rainGain, rainSource;
+let soundOn = false, audioInited = false;
+const soundBtn = document.getElementById('sound-btn');
+
+function initAudio() {
+  if (audioInited) return;
+  audioInited = true;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  masterGain = audioCtx.createGain(); masterGain.gain.value = 1; masterGain.connect(audioCtx.destination);
+  // City hum: 60Hz sawtooth
+  const cityOsc = audioCtx.createOscillator(); cityOsc.type = 'sawtooth'; cityOsc.frequency.value = 60;
+  cityGain = audioCtx.createGain(); cityGain.gain.value = 0.02;
+  cityOsc.connect(cityGain); cityGain.connect(masterGain); cityOsc.start();
+  // Wind: 180Hz triangle with LFO
+  const windOsc = audioCtx.createOscillator(); windOsc.type = 'triangle'; windOsc.frequency.value = 180;
+  const lfo = audioCtx.createOscillator(); lfo.frequency.value = 0.5;
+  const lfoGain = audioCtx.createGain(); lfoGain.gain.value = 20;
+  lfo.connect(lfoGain); lfoGain.connect(windOsc.frequency); lfo.start();
+  windGain = audioCtx.createGain(); windGain.gain.value = 0.01;
+  windOsc.connect(windGain); windGain.connect(masterGain); windOsc.start();
+  // Rain: white noise buffer (looping)
+  const bufSize = audioCtx.sampleRate * 2, buf = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < bufSize; i++) data[i] = Math.random() * 2 - 1;
+  rainSource = audioCtx.createBufferSource(); rainSource.buffer = buf; rainSource.loop = true;
+  rainGain = audioCtx.createGain(); rainGain.gain.value = 0;
+  rainSource.connect(rainGain); rainGain.connect(masterGain); rainSource.start();
+  soundOn = true; soundBtn.textContent = '🔊 Sound: ON';
+}
+
+function updateAudioWeather(weatherIndex) {
+  if (!audioCtx || !soundOn) return;
+  const gains = [0, 0.05, 0.1]; // clear, light rain, heavy rain
+  rainGain.gain.setTargetAtTime(gains[weatherIndex] || 0, audioCtx.currentTime, 0.3);
+}
+
+soundBtn.addEventListener('click', () => {
+  if (!audioInited) { initAudio(); return; }
+  soundOn = !soundOn;
+  masterGain.gain.value = soundOn ? 1 : 0;
+  soundBtn.textContent = soundOn ? '🔊 Sound: ON' : '🔇 Sound: OFF';
+});
+
+// Start audio on first interaction (autoplay policy)
+function firstInteraction() {
+  if (!audioInited) initAudio();
+  document.removeEventListener('click', firstInteraction);
+  document.removeEventListener('keydown', firstInteraction);
+}
+document.addEventListener('click', firstInteraction);
+document.addEventListener('keydown', firstInteraction);
 
 // ── Game loop ──────────────────────────────────────────────────────
 const clock = new THREE.Clock();
