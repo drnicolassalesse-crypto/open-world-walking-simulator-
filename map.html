@@ -80,6 +80,16 @@
   #photo-prompt { position:fixed;bottom:120px;left:50%;transform:translateX(-50%);z-index:55;color:#FFD700;font-size:14px;font-weight:bold;text-shadow:0 1px 3px #000;display:none;pointer-events:none; }
   #photo-toast { position:fixed;top:70px;left:50%;transform:translateX(-50%);z-index:55;background:rgba(0,0,0,0.7);color:#FFD700;padding:8px 18px;border-radius:8px;font-size:13px;display:none;pointer-events:none; }
   #achieve-popup { position:fixed;top:40%;left:50%;transform:translate(-50%,-50%);z-index:90;color:#FFD700;font-size:28px;font-weight:bold;text-shadow:0 2px 8px rgba(0,0,0,0.8);pointer-events:none;display:none;text-align:center;transition:opacity 0.5s; }
+  #info-btn { position:fixed;bottom:20px;left:180px;z-index:50;padding:8px 16px;background:rgba(0,0,0,0.6);color:#fff;border:1px solid rgba(255,255,255,0.2);border-radius:8px;cursor:pointer;font-size:13px; }
+  #info-btn:hover { background:rgba(0,0,0,0.8); }
+  #info-overlay { position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:150;display:none;align-items:center;justify-content:center; }
+  #info-panel { width:60%;max-width:600px;max-height:80vh;overflow-y:auto;background:#1a1a2e;border:2px solid #da251d;border-radius:12px;padding:28px;color:#eee;font-size:14px;line-height:1.8;position:relative; }
+  #info-panel h2 { color:#FFD700;font-size:20px;margin-bottom:12px;border-bottom:2px solid #da251d;padding-bottom:8px; }
+  #info-panel .fact { margin:10px 0;padding-left:12px;border-left:3px solid #da251d; }
+  #info-panel .fact strong { color:#FFD700; }
+  #info-panel .fact em { color:rgba(255,255,255,0.5);font-style:normal;font-size:12px; }
+  #info-close { position:absolute;top:10px;right:14px;background:none;border:none;color:#fff;font-size:22px;cursor:pointer; }
+  #info-close:hover { color:#da251d; }
 </style>
 </head>
 <body>
@@ -107,6 +117,18 @@
 <div id="photo-prompt">Press F to take photo</div>
 <div id="photo-toast"></div>
 <div id="achieve-popup"></div>
+<button id="info-btn">Area Info</button>
+<div id="info-overlay">
+  <div id="info-panel">
+    <button id="info-close">✕</button>
+    <h2>Landmark 81 &amp; Vinhomes Central Park</h2>
+    <div class="fact"><strong>Landmark 81</strong><br>Height: 461.3m · 81 floors · Completed 2018<br>Vietnam's tallest building, mixed-use skyscraper<br><em>Architect: Atkins</em></div>
+    <div class="fact"><strong>Vinhomes Central Park</strong><br>43.1 hectares urban area · Opened 2016<br>Premium residential complex with parks, pools &amp; gardens<br><em>Developer: Vingroup</em></div>
+    <div class="fact"><strong>Saigon River</strong><br>256 km long · Connects Ho Chi Minh City to the East Sea<br>Major waterway for commerce and transportation</div>
+    <div class="fact"><strong>Location</strong><br>GPS: 10.7950°N, 106.7219°E<br>District: Binh Thanh, Ho Chi Minh City, Vietnam</div>
+    <div class="fact"><strong>Ho Chi Minh City</strong><br>Population: ~9 million · Vietnam's largest city<br>Formerly known as Saigon · Major economic hub of Southeast Asia</div>
+  </div>
+</div>
 <button id="vr-btn">Enter VR</button>
 
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.163.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.163.0/examples/jsm/"}}</script>
@@ -903,6 +925,18 @@ renderer.setAnimationLoop(() => {
   }
 
   renderer.render(scene, camera);
+});
+
+// ── Area Info Panel ────────────────────────────────────────────────
+const infoOverlay = document.getElementById('info-overlay');
+document.getElementById('info-btn').addEventListener('click', () => {
+  infoOverlay.style.display = infoOverlay.style.display === 'flex' ? 'none' : 'flex';
+  if (infoOverlay.style.display === 'flex') document.exitPointerLock();
+  else renderer.domElement.requestPointerLock();
+});
+document.getElementById('info-close').addEventListener('click', () => {
+  infoOverlay.style.display = 'none';
+  renderer.domElement.requestPointerLock();
 });
 </script>
 </body>
