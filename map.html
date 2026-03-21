@@ -545,11 +545,16 @@ function ensureSafeSpawn() {
     hudBldg.textContent = buildingCount;
     loadBar.style.width = '80%';
     ensureSafeSpawn();
-    // Fetch OSM streets after buildings
-    SB.build(THREE, scene, latLonToXZ, status => {
-      if (status === 'streets-done') loadBar.style.width = '95%';
-    }).then(result => { streetLamps = result.lamps || []; });
     dismissLoading();
+    // Fetch OSM streets after delay (Overpass API rate-limits concurrent requests)
+    setTimeout(() => {
+      SB.build(THREE, scene, latLonToXZ, status => {
+        if (status === 'streets-done') loadBar.style.width = '95%';
+      }).then(result => {
+        streetLamps = result.lamps || [];
+        console.log('[map] Streets loaded:', result.roadCount, 'roads');
+      }).catch(err => console.warn('[map] Street build failed:', err));
+    }, 3000);
   } catch (err) {
     console.warn('Overpass API failed:', err);
     errorMsg.textContent = 'OSM data unavailable — showing key landmarks only';
@@ -558,9 +563,13 @@ function ensureSafeSpawn() {
     buildingCount = fallbackBuildings.length;
     hudBldg.textContent = buildingCount + ' (fallback)';
     ensureSafeSpawn();
-    // Still try to fetch streets even on building fallback
-    SB.build(THREE, scene, latLonToXZ).then(result => { streetLamps = result.lamps || []; });
     dismissLoading();
+    // Fetch streets after delay even on building fallback
+    setTimeout(() => {
+      SB.build(THREE, scene, latLonToXZ).then(result => {
+        streetLamps = result.lamps || [];
+      }).catch(err => console.warn('[map] Street build failed:', err));
+    }, 3000);
   }
 })();
 
