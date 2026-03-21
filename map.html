@@ -184,6 +184,7 @@
 <button id="vr-btn">Enter VR</button>
 
 <script src="textures.js"></script>
+<script src="streets.js"></script>
 <script src="map-systems.js"></script>
 <script src="landmarks.js"></script>
 <script src="vr-hands.js"></script>
@@ -358,8 +359,9 @@ const waterMat = TX.createWaterMaterial(THREE);
 const river = new THREE.Mesh(new THREE.PlaneGeometry(200, GROUND_SIZE, 20, 20), waterMat);
 river.rotation.x = -Math.PI / 2; river.position.set(latLonToXZ(CENTER_LAT, 106.7260).x, -0.5, 0); scene.add(river);
 
-// ── Roads, sidewalks, and green spaces ─────────────────────────────
-TX.addRoads(THREE, scene, latLonToXZ);
+// ── OSM Streets (loaded async after buildings) ─────────────────────
+let streetLamps = [];
+const SB = window.StreetBuilder;
 
 // ── Building storage for collision ─────────────────────────────────
 const buildingBoxes = []; // { min: {x,z}, max: {x,z} }
@@ -543,6 +545,10 @@ function ensureSafeSpawn() {
     hudBldg.textContent = buildingCount;
     loadBar.style.width = '80%';
     ensureSafeSpawn();
+    // Fetch OSM streets after buildings
+    SB.build(THREE, scene, latLonToXZ, status => {
+      if (status === 'streets-done') loadBar.style.width = '95%';
+    }).then(result => { streetLamps = result.lamps || []; });
     dismissLoading();
   } catch (err) {
     console.warn('Overpass API failed:', err);
@@ -552,6 +558,8 @@ function ensureSafeSpawn() {
     buildingCount = fallbackBuildings.length;
     hudBldg.textContent = buildingCount + ' (fallback)';
     ensureSafeSpawn();
+    // Still try to fetch streets even on building fallback
+    SB.build(THREE, scene, latLonToXZ).then(result => { streetLamps = result.lamps || []; });
     dismissLoading();
   }
 })();
@@ -851,6 +859,8 @@ renderer.setAnimationLoop((timestamp, xrFrame) => {
   const dt = Math.min(clock.getDelta(), 0.1);
   updateDayNight(dt);
   updateWeather(dt);
+  // Update street lamps with day/night cycle
+  SB.updateLamps(streetLamps, gameMinutes / 1440);
   // Update water shader time
   if (waterMat.uniforms) waterMat.uniforms.uTime.value = clock.elapsedTime;
 
