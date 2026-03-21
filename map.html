@@ -247,7 +247,7 @@ const ambLight = scene.children.find(c => c.isAmbientLight);
 let gameMinutes = 7 * 60; // start at 7:00 AM (minutes since midnight)
 const hudTime = document.getElementById('hud-time');
 
-// Landmark 81 night glow light (off by default)
+// Landmark 81 night glow light (legacy ref for updateDayNight)
 const towerGlow = new THREE.PointLight(0xffd700, 0, 200);
 towerGlow.position.set(0, 300, 0);
 scene.add(towerGlow);
@@ -304,6 +304,16 @@ function updateDayNight(dt) {
   ambLight.intensity = ambInt;
   sun.intensity = sunInt;
   towerGlow.intensity = isNight ? 3 : 0;
+
+  // Landmark 81 architectural lighting
+  const nightFade = isNight ? 1 : (h >= 19 ? h - 19 : h < 6 ? 1 : 0);
+  for (const item of lm81Lights) {
+    if (item.type === 'beacon') { item.light.intensity = nightFade > 0.1 ? 2 * (0.5 + 0.5 * Math.sin(Date.now() * 0.003)) : 0; }
+    else if (item.type === 'beaconGlow') { item.mesh.material.opacity = nightFade > 0.1 ? 0.6 * (0.5 + 0.5 * Math.sin(Date.now() * 0.003)) : 0; }
+    else if (item.type === 'rim') { item.light.intensity = nightFade * 2.5; }
+    else if (item.type === 'uplight') { item.light.intensity = nightFade * 4; }
+    else if (item.type === 'edge') { item.mesh.material.opacity = nightFade * 0.5; }
+  }
 
   // Draw stars on background when night
   if (isNight) {
@@ -404,24 +414,143 @@ function addLabel(text, x, y, z) {
 }
 
 // ── Landmark 81 (always present) ───────────────────────────────────
+// ── Landmark 81 — realistic multi-segment model ────────────────────
+const lm81Lights = []; // night-only lights for animation loop
 (function createLandmark81() {
-  // Tapered tower body with glass texture
-  const towerGeo = new THREE.CylinderGeometry(15, 22, 461, 8);
-  const towerMat = TX.getBuildingMaterial(THREE, 461, true);
-  const tower = new THREE.Mesh(towerGeo, towerMat);
-  tower.position.set(0, 461 / 2, 0);
-  tower.castShadow = true; tower.receiveShadow = true;
-  scene.add(tower);
-  // Antenna spire
-  const antennaGeo = new THREE.BoxGeometry(2, 65, 2);
-  const antenna = new THREE.Mesh(antennaGeo, towerMat);
-  antenna.position.set(0, 461 + 32, 0);
-  antenna.castShadow = true;
-  scene.add(antenna);
+  const glassMat = TX.getBuildingMaterial(THREE, 461, true);
+
+  // Helper: procedural window-grid texture for glass curtain wall
+  function makeGlassCanvas(w, h, tint, floorH) {
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = tint; ctx.fillRect(0, 0, w, h);
+    ctx.strokeStyle = 'rgba(180,210,240,0.25)'; ctx.lineWidth = 1;
+    const rows = Math.round(h / floorH);
+    for (let r = 0; r <= rows; r++) { const y = (r / rows) * h; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
+    const cols = Math.round(w / 8);
+    for (let c2 = 0; c2 <= cols; c2++) { const x = (c2 / cols) * w; ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); }
+    // Random lit windows
+    ctx.fillStyle = 'rgba(255,230,160,0.12)';
+    for (let r = 0; r < rows; r++) for (let c2 = 0; c2 < cols; c2++) {
+      if (Math.random() < 0.3) ctx.fillRect((c2 / cols) * w + 1, (r / rows) * h + 1, w / cols - 2, h / rows - 2);
+    }
+    return c;
+  }
+
+  function makeSegmentMat(tint, floorH) {
+    const canvas = makeGlassCanvas(128, 256, tint, floorH || 8);
+    const map = new THREE.CanvasTexture(canvas);
+    map.wrapS = map.wrapT = THREE.RepeatWrapping; map.colorSpace = THREE.SRGBColorSpace;
+    return new THREE.MeshStandardMaterial({ map, roughness: 0.12, metalness: 0.35, envMapIntensity: 1.3 });
+  }
+
+  // Podium mat: stone/concrete look
+  const podiumCanvas = makeGlassCanvas(128, 64, '#8a7e6e', 16);
+  const podiumTex = new THREE.CanvasTexture(podiumCanvas);
+  podiumTex.wrapS = podiumTex.wrapT = THREE.RepeatWrapping; podiumTex.colorSpace = THREE.SRGBColorSpace;
+  const podiumMat = new THREE.MeshStandardMaterial({ map: podiumTex, roughness: 0.75, metalness: 0.05 });
+
+  // ── 1. Podium base (floors 1-4) ────────────────────
+  const podiumH = 20, podiumR = 35;
+  const podium = new THREE.Mesh(new THREE.CylinderGeometry(podiumR - 2, podiumR, podiumH, 8), podiumMat);
+  podium.position.set(0, podiumH / 2, 0); podium.castShadow = true; podium.receiveShadow = true;
+  scene.add(podium);
+
+  // Entrance canopy
+  const canopy = new THREE.Mesh(new THREE.BoxGeometry(18, 1, 8), new THREE.MeshStandardMaterial({ color: 0x556677, metalness: 0.5, roughness: 0.3 }));
+  canopy.position.set(0, 5, podiumR + 3); canopy.castShadow = true; scene.add(canopy);
+  const canopySupport = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 5, 6), new THREE.MeshStandardMaterial({ color: 0x888888 }));
+  for (const sx of [-7, 7]) { const s = canopySupport.clone(); s.position.set(sx, 2.5, podiumR + 6); scene.add(s); }
+
+  // ── 2. Lower tower (floors 5-50): 30→20m radius ───
+  const lowerH = 180, lowerBot = podiumH;
+  const lowerMat = makeSegmentMat('#2a4a6a', 6);
+  const lower = new THREE.Mesh(new THREE.CylinderGeometry(20, 30, lowerH, 8), lowerMat);
+  lower.position.set(0, lowerBot + lowerH / 2, 0); lower.castShadow = true; lower.receiveShadow = true;
+  scene.add(lower);
+
+  // ── 3. Mid tower (floors 51-70): 20→16m radius ────
+  const midH = 80, midBot = lowerBot + lowerH;
+  const midMat = makeSegmentMat('#1e3e5e', 5);
+  const mid = new THREE.Mesh(new THREE.CylinderGeometry(16, 20, midH, 8), midMat);
+  mid.position.set(0, midBot + midH / 2, 0); mid.castShadow = true; mid.receiveShadow = true;
+  scene.add(mid);
+
+  // ── 4. Upper tower (floors 71-78): 16→12m radius ──
+  const upperH = 40, upperBot = midBot + midH;
+  const upperMat = makeSegmentMat('#1a3555', 5);
+  const upper = new THREE.Mesh(new THREE.CylinderGeometry(12, 16, upperH, 8), upperMat);
+  upper.position.set(0, upperBot + upperH / 2, 0); upper.castShadow = true; upper.receiveShadow = true;
+  scene.add(upper);
+
+  // ── 5. Observation deck (floor 79) ────────────────
+  const obsH = 6, obsBot = upperBot + upperH, obsR = 13;
+  const obsMat = new THREE.MeshStandardMaterial({ color: 0x88bbdd, roughness: 0.08, metalness: 0.6, transparent: true, opacity: 0.7 });
+  const obs = new THREE.Mesh(new THREE.CylinderGeometry(obsR, 12, obsH, 16), obsMat);
+  obs.position.set(0, obsBot + obsH / 2, 0); obs.castShadow = true; scene.add(obs);
+
+  // Observation deck glass dome
+  const dome = new THREE.Mesh(new THREE.SphereGeometry(obsR, 16, 8, 0, Math.PI * 2, 0, Math.PI / 3),
+    new THREE.MeshStandardMaterial({ color: 0xaaddff, transparent: true, opacity: 0.35, metalness: 0.4, roughness: 0.05, side: THREE.DoubleSide }));
+  dome.position.set(0, obsBot + obsH, 0); scene.add(dome);
+
+  // Sky bridge ring at observation level
+  const bridgeGeo = new THREE.TorusGeometry(obsR + 3, 0.8, 6, 16);
+  const bridge = new THREE.Mesh(bridgeGeo, new THREE.MeshStandardMaterial({ color: 0x667788, metalness: 0.5, roughness: 0.3 }));
+  bridge.position.set(0, obsBot + obsH / 2, 0); bridge.rotation.x = Math.PI / 2; scene.add(bridge);
+
+  // Observation deck rim light
+  const obsRimLight = new THREE.PointLight(0x44aaff, 0, 60);
+  obsRimLight.position.set(0, obsBot + obsH, 0); scene.add(obsRimLight);
+  lm81Lights.push({ light: obsRimLight, type: 'rim' });
+
+  // ── 6. Crown/spire (floors 80-81 + spire) ─────────
+  const crownH = 30, crownBot = obsBot + obsH;
+  const crownMat = makeSegmentMat('#15304a', 4);
+  const crown = new THREE.Mesh(new THREE.CylinderGeometry(3, 12, crownH, 8), crownMat);
+  crown.position.set(0, crownBot + crownH / 2, 0); crown.castShadow = true; scene.add(crown);
+
+  // Spire
+  const spireH = 105, spireBot = crownBot + crownH;
+  const spireMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 0.7, roughness: 0.2 });
+  const spire = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 2.5, spireH, 6), spireMat);
+  spire.position.set(0, spireBot + spireH / 2, 0); spire.castShadow = true; scene.add(spire);
+
+  // Spire beacon light
+  const beacon = new THREE.PointLight(0xff3333, 0, 120);
+  beacon.position.set(0, spireBot + spireH, 0); scene.add(beacon);
+  lm81Lights.push({ light: beacon, type: 'beacon' });
+
+  // Spire glow sphere
+  const beaconGlow = new THREE.Mesh(new THREE.SphereGeometry(1.2, 8, 8),
+    new THREE.MeshBasicMaterial({ color: 0xff2222, transparent: true, opacity: 0 }));
+  beaconGlow.position.set(0, spireBot + spireH, 0); scene.add(beaconGlow);
+  lm81Lights.push({ mesh: beaconGlow, type: 'beaconGlow' });
+
+  // ── 7. Corner accent LED strips (4 edges) ─────────
+  const stripMat = new THREE.MeshBasicMaterial({ color: 0x3388cc, transparent: true, opacity: 0 });
+  const totalH = crownBot + crownH;
+  for (let a = 0; a < 4; a++) {
+    const angle = (a / 4) * Math.PI * 2;
+    const sx = Math.cos(angle) * 14, sz = Math.sin(angle) * 14;
+    const strip = new THREE.Mesh(new THREE.BoxGeometry(0.4, totalH - podiumH, 0.4), stripMat.clone());
+    strip.position.set(sx, podiumH + (totalH - podiumH) / 2, sz); scene.add(strip);
+    lm81Lights.push({ mesh: strip, type: 'edge' });
+  }
+
+  // ── 8. Base up-lighting (4 spots) ─────────────────
+  for (let a = 0; a < 4; a++) {
+    const angle = (a / 4) * Math.PI * 2 + Math.PI / 4;
+    const bx = Math.cos(angle) * (podiumR + 3), bz = Math.sin(angle) * (podiumR + 3);
+    const upLight = new THREE.SpotLight(0xffd700, 0, 200, Math.PI / 6, 0.6);
+    upLight.position.set(bx, 1, bz); upLight.target.position.set(bx * 0.3, 150, bz * 0.3);
+    scene.add(upLight); scene.add(upLight.target);
+    lm81Lights.push({ light: upLight, type: 'uplight' });
+  }
+
   // Collision box
-  buildingBoxes.push({ min: { x: -25, z: -25 }, max: { x: 25, z: 25 } });
-  // Label
-  addLabel('Landmark 81\n461m', 0, 520, 0);
+  buildingBoxes.push({ min: { x: -38, z: -38 }, max: { x: 38, z: 38 } });
+  addLabel('Landmark 81\n461m · 81 Floors', 0, spireBot + spireH + 15, 0);
 })();
 
 // ── Fallback hardcoded buildings ───────────────────────────────────
