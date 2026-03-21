@@ -756,8 +756,8 @@ document.addEventListener('pointerlockchange', () => {
 
 document.addEventListener('mousemove', e => {
   if (!locked) return;
-  yaw -= e.movementX * 0.002;
-  pitch -= e.movementY * 0.002;
+  yaw -= e.movementX * 0.0008;
+  pitch -= e.movementY * 0.0008;
   pitch = Math.max(-Math.PI / 2.1, Math.min(Math.PI / 2.1, pitch));
 });
 
