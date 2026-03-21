@@ -41,10 +41,12 @@
     background: rgba(0,0,0,0.35); backdrop-filter: blur(6px);
     border: 1px solid rgba(255,255,255,0.08);
     border-radius: 10px; padding: 14px 18px;
-    line-height: 1.8; pointer-events: none;
+    line-height: 1.8; pointer-events: auto;
     font-variant-numeric: tabular-nums;
   }
   #hud .label { color: rgba(255,255,255,0.35); }
+  #hud a.map-link { color: #7ec8e3; text-decoration: none; font-size: 11px; pointer-events: auto; }
+  #hud a.map-link:hover { text-decoration: underline; }
 
   #crosshair {
     position: fixed; top: 50%; left: 50%;
@@ -271,6 +273,7 @@
   <span class="label">SND</span> <span id="hud-sound">ON</span><br>
   <span class="label">BEST</span> <span id="hud-best">0</span>
   <div id="stamina-bar"><div id="stamina-fill" style="background:#4CAF50"></div></div>
+  <a class="map-link" href="map.html">🗺 Explore Landmark 81</a>
 </div>
 
 <div id="npc-dialog">
