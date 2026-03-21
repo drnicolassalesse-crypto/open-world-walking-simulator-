@@ -27,6 +27,9 @@
     text-align: center;
   }
   #title small { display: block; font-size: 11px; font-weight: normal; color: rgba(255,255,255,0.5); margin-top: 2px; }
+  #controls-hint { position:fixed;bottom:50%;left:50%;transform:translate(-50%,50%);z-index:55;color:#fff;font-size:16px;text-align:center;pointer-events:none;opacity:0;transition:opacity 0.4s; }
+  #controls-hint.visible { opacity:1; }
+  #lock-indicator { position:fixed;top:20px;right:150px;z-index:50;font-size:11px;padding:4px 10px;border-radius:6px;pointer-events:none;transition:opacity 0.3s; }
   #crosshair {
     position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
     width: 20px; height: 20px; z-index: 40; pointer-events: none;
@@ -123,6 +126,8 @@
 <div id="welcome"><h3>Welcome to Landmark 81, Ho Chi Minh City!</h3><p>WASD to move, mouse to look, E to talk to NPCs<br>Collect items, take photos, earn score!</p></div>
 <div id="title">Landmark 81 Area — Ho Chi Minh City<small>Click to explore · WASD to move · Shift to sprint</small></div>
 <div id="crosshair"></div>
+<div id="controls-hint">Click anywhere to enable controls<br><small>WASD to move · Mouse to look · Shift to sprint</small></div>
+<div id="lock-indicator" style="background:rgba(200,60,60,0.7);color:#fff">🔓 Click to enable controls</div>
 <div id="hud">
   <span class="label">LAT</span> <span id="hud-lat">10.7950</span><br>
   <span class="label">LON</span> <span id="hud-lon">106.7219</span><br>
@@ -438,7 +443,7 @@ function dismissLoading() {
   setTimeout(() => { loadingEl.style.opacity = '0'; }, 300);
   setTimeout(() => { loadingEl.style.display = 'none'; welcomeEl.style.display = 'block'; welcomeEl.style.opacity = '1'; }, 1100);
   setTimeout(() => { welcomeEl.style.opacity = '0'; }, 4100);
-  setTimeout(() => { welcomeEl.style.display = 'none'; }, 4600);
+  setTimeout(() => { welcomeEl.style.display = 'none'; controlsHint.classList.add('visible'); setTimeout(() => controlsHint.classList.remove('visible'), 4000); }, 4600);
 }
 // Fallback: dismiss after 3 seconds even if fetch is slow
 setTimeout(dismissLoading, 3000);
@@ -520,16 +525,44 @@ const velocity = new THREE.Vector3();
 const keys = {};
 let yaw = 0, pitch = 0;
 let locked = false;
+const lockIndicator = document.getElementById('lock-indicator');
+const controlsHint = document.getElementById('controls-hint');
 
-document.addEventListener('keydown', e => { keys[e.code] = true; });
+document.addEventListener('keydown', e => {
+  keys[e.code] = true;
+  // Auto-request pointer lock on WASD if not locked
+  if (!locked && !inVR && ['KeyW','KeyA','KeyS','KeyD'].includes(e.code)) {
+    renderer.domElement.requestPointerLock();
+  }
+});
 document.addEventListener('keyup', e => { keys[e.code] = false; });
 
-renderer.domElement.addEventListener('click', () => {
+// Click anywhere on body to request pointer lock (not just canvas)
+document.body.addEventListener('click', (e) => {
+  if (inVR) return;
+  // Don't lock if clicking UI buttons
+  if (e.target.closest('#hud, #info-btn, #sound-btn, #vr-btn, #info-overlay, #npc-dialog, #poi-info')) return;
   renderer.domElement.requestPointerLock();
 });
+
 document.addEventListener('pointerlockchange', () => {
   locked = !!document.pointerLockElement;
+  if (locked) {
+    lockIndicator.style.background = 'rgba(60,160,60,0.7)';
+    lockIndicator.textContent = '🔒 Controls active';
+    controlsHint.classList.remove('visible');
+  } else {
+    lockIndicator.style.background = 'rgba(200,60,60,0.7)';
+    lockIndicator.textContent = '🔓 Click to enable controls';
+    // Show hint briefly after losing lock (unless a dialog is open)
+    if (!document.getElementById('npc-dialog').style.display ||
+        document.getElementById('npc-dialog').style.display === 'none') {
+      controlsHint.classList.add('visible');
+      setTimeout(() => controlsHint.classList.remove('visible'), 3000);
+    }
+  }
 });
+
 document.addEventListener('mousemove', e => {
   if (!locked) return;
   yaw -= e.movementX * 0.002;
