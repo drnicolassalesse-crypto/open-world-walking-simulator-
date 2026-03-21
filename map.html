@@ -174,6 +174,7 @@
 
 <script src="map-systems.js"></script>
 <script src="landmarks.js"></script>
+<script src="vr-hands.js"></script>
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.163.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.163.0/examples/jsm/"}}</script>
 <script type="module">
 import * as THREE from 'three';
@@ -570,7 +571,7 @@ if (navigator.xr) {
     const btn = document.getElementById('vr-btn');
     btn.style.display = 'block';
     btn.addEventListener('click', () => {
-      navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor'] }).then(session => {
+      navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor', 'hand-tracking'] }).then(session => {
         renderer.xr.setSession(session);
         inVR = true; hudVR.style.display = 'block';
         vrYaw = yaw; // inherit current facing
@@ -631,6 +632,10 @@ const LM = window.Landmarks;
 const poiMarkers = LM.createPOIMarkers(THREE, scene, latLonToXZ);
 LM.setupInteraction(THREE, camera, poiMarkers, renderer);
 LM.initAmbience();
+
+// ── Initialize VR Hand Tracking ─────────────────────────────────────
+const VRH = window.VRHands;
+VRH.init(THREE, scene, camera, poiMarkers);
 
 // ── Minimap + Compass ──────────────────────────────────────────────
 const mmCanvas = document.getElementById('minimap');
@@ -752,7 +757,7 @@ document.addEventListener('keydown', firstInteraction);
 // ── Game loop ──────────────────────────────────────────────────────
 const clock = new THREE.Clock();
 
-renderer.setAnimationLoop(() => {
+renderer.setAnimationLoop((timestamp, xrFrame) => {
   const dt = Math.min(clock.getDelta(), 0.1);
   updateDayNight(dt);
   updateWeather(dt);
@@ -801,6 +806,17 @@ renderer.setAnimationLoop(() => {
     drawCompass();
   } else {
     updateVRLocomotion(dt);
+    // VR hand tracking & interactions
+    const vrSession = renderer.xr.getSession();
+    const refSpace = renderer.xr.getReferenceSpace();
+    VRH.update(xrFrame, refSpace, dt, {
+      session: vrSession, THREE, camera, scene, vrCamGroup,
+      vrYaw, poiMarkers, npcs, collectibles, photoSpots,
+      MS, LM, clock,
+    });
+    // Update POI markers + NPC labels in VR too
+    LM.updateMarkers(poiMarkers, dt, clock.elapsedTime, camera);
+    MS.updateCollectibles(collectibles, dt, clock.elapsedTime, camera, scene);
   }
 
   renderer.render(scene, camera);
