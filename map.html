@@ -91,6 +91,7 @@
   <span class="label">DIR</span> <span id="hud-dir">N</span><br>
   <span class="label">BLDG</span> <span id="hud-bldg">0</span><br>
   <span class="label">TIME</span> <span id="hud-time">7:00 AM</span><br>
+  <span class="label">SKY</span> <span id="hud-weather">☀️ Clear</span><br>
   <span id="hud-photos">📸 Photos: 0/3</span><br>
   <a href="index.html">← Back to main game</a>
 </div>
@@ -225,6 +226,53 @@ function updateDayNight(dt) {
     starTex.needsUpdate = true;
     scene.background = starTex;
   }
+}
+
+// ── Rain / Weather System ──────────────────────────────────────────
+const RAIN_COUNT = 500;
+const rainGeo = new THREE.BufferGeometry();
+const rainPositions = new Float32Array(RAIN_COUNT * 3);
+for (let i = 0; i < RAIN_COUNT; i++) {
+  rainPositions[i * 3] = (Math.random() - 0.5) * 500;
+  rainPositions[i * 3 + 1] = Math.random() * 200;
+  rainPositions[i * 3 + 2] = (Math.random() - 0.5) * 500;
+}
+rainGeo.setAttribute('position', new THREE.BufferAttribute(rainPositions, 3));
+const rainMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.4, transparent: true, opacity: 0.5 });
+const rainMesh = new THREE.Points(rainGeo, rainMat);
+rainMesh.visible = false;
+scene.add(rainMesh);
+
+const hudWeather = document.getElementById('hud-weather');
+const weatherCycle = [{ name: 'Clear', icon: '☀️', dur: 60, count: 0 }, { name: 'Light Rain', icon: '🌧', dur: 30, count: 200 }, { name: 'Heavy Rain', icon: '🌧', dur: 60, count: 500 }];
+let weatherIdx = 0, weatherTimer = 0;
+const baseFogDensity = 0.0008;
+
+function updateWeather(dt) {
+  weatherTimer += dt;
+  if (weatherTimer >= weatherCycle[weatherIdx].dur) {
+    weatherTimer = 0;
+    weatherIdx = (weatherIdx + 1) % weatherCycle.length;
+    hudWeather.textContent = weatherCycle[weatherIdx].icon + ' ' + weatherCycle[weatherIdx].name;
+  }
+  const wc = weatherCycle[weatherIdx];
+  rainMesh.visible = wc.count > 0;
+  if (!rainMesh.visible) { scene.fog.density = baseFogDensity; return; }
+  // Move rain particles downward + wind
+  const pos = rainGeo.attributes.position.array;
+  const cx = camera.position.x, cz = camera.position.z;
+  for (let i = 0; i < wc.count; i++) {
+    pos[i * 3 + 1] -= 30 * dt; // fall
+    pos[i * 3] += 5 * dt;       // wind
+    if (pos[i * 3 + 1] < 0) {
+      pos[i * 3] = cx + (Math.random() - 0.5) * 500;
+      pos[i * 3 + 1] = 150 + Math.random() * 50;
+      pos[i * 3 + 2] = cz + (Math.random() - 0.5) * 500;
+    }
+  }
+  rainGeo.attributes.position.needsUpdate = true;
+  // Heavy rain: denser fog
+  scene.fog.density = wc.count >= 500 ? 0.0018 : 0.0012;
 }
 
 // ── Ground plane with OSM tiles ────────────────────────────────────
@@ -664,6 +712,7 @@ const clock = new THREE.Clock();
 renderer.setAnimationLoop(() => {
   const dt = Math.min(clock.getDelta(), 0.1);
   updateDayNight(dt);
+  updateWeather(dt);
 
   if (!inVR) {
     // Movement
