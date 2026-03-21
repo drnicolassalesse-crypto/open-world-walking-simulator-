@@ -128,6 +128,12 @@
 <div id="crosshair"></div>
 <div id="controls-hint">Click anywhere to enable controls<br><small>WASD to move · Mouse to look · Shift to sprint</small></div>
 <div id="lock-indicator" style="background:rgba(200,60,60,0.7);color:#fff">🔓 Click to enable controls</div>
+<div id="key-debug" style="position:fixed;bottom:20px;right:20px;z-index:50;font-size:12px;font-family:monospace;pointer-events:none;display:grid;grid-template-columns:auto auto auto;gap:2px 4px;text-align:center;">
+  <div></div><div id="kd-w" style="background:rgba(255,255,255,0.1);padding:2px 8px;border-radius:3px;color:rgba(255,255,255,0.3)">W</div><div></div>
+  <div id="kd-a" style="background:rgba(255,255,255,0.1);padding:2px 8px;border-radius:3px;color:rgba(255,255,255,0.3)">A</div>
+  <div id="kd-s" style="background:rgba(255,255,255,0.1);padding:2px 8px;border-radius:3px;color:rgba(255,255,255,0.3)">S</div>
+  <div id="kd-d" style="background:rgba(255,255,255,0.1);padding:2px 8px;border-radius:3px;color:rgba(255,255,255,0.3)">D</div>
+</div>
 <div id="hud">
   <span class="label">LAT</span> <span id="hud-lat">10.7950</span><br>
   <span class="label">LON</span> <span id="hud-lon">106.7219</span><br>
@@ -457,6 +463,24 @@ function dismissLoading() {
 // Fallback: dismiss after 3 seconds even if fetch is slow
 setTimeout(dismissLoading, 3000);
 
+// After buildings load, check if camera is trapped inside a collision box.
+// If so, search outward in a spiral for a safe position.
+function ensureSafeSpawn() {
+  const cx = camera.position.x, cz = camera.position.z;
+  if (!checkCollision(cx, cz)) return; // Already safe
+  console.warn('Camera spawned inside building collision — relocating');
+  // Spiral outward to find safe spot
+  for (let r = 5; r < 200; r += 5) {
+    for (let a = 0; a < Math.PI * 2; a += Math.PI / 6) {
+      const tx = cx + Math.cos(a) * r, tz = cz + Math.sin(a) * r;
+      if (!checkCollision(tx, tz) && Math.abs(tx) < GROUND_SIZE / 2 && Math.abs(tz) < GROUND_SIZE / 2) {
+        camera.position.set(tx, CAM_HEIGHT, tz);
+        return;
+      }
+    }
+  }
+}
+
 (async function fetchOSMBuildings() {
   const overpassUrl = 'https://overpass-api.de/api/interpreter';
   const query = `[out:json][timeout:25];(way["building"](10.7895,106.7165,10.8005,106.7273);relation["building"](10.7895,106.7165,10.8005,106.7273););out body;>;out skel qt;`;
@@ -518,6 +542,7 @@ setTimeout(dismissLoading, 3000);
 
     hudBldg.textContent = buildingCount;
     loadBar.style.width = '80%';
+    ensureSafeSpawn();
     dismissLoading();
   } catch (err) {
     console.warn('Overpass API failed:', err);
@@ -526,6 +551,7 @@ setTimeout(dismissLoading, 3000);
     addFallbacks();
     buildingCount = fallbackBuildings.length;
     hudBldg.textContent = buildingCount + ' (fallback)';
+    ensureSafeSpawn();
     dismissLoading();
   }
 })();
@@ -537,15 +563,24 @@ let yaw = 0, pitch = 0;
 let locked = false;
 const lockIndicator = document.getElementById('lock-indicator');
 const controlsHint = document.getElementById('controls-hint');
+const kdW = document.getElementById('kd-w'), kdA = document.getElementById('kd-a');
+const kdS = document.getElementById('kd-s'), kdD = document.getElementById('kd-d');
+const keyDebugMap = { KeyW: kdW, KeyA: kdA, KeyS: kdS, KeyD: kdD };
+const KEY_ACTIVE = 'background:rgba(80,200,80,0.7);padding:2px 8px;border-radius:3px;color:#fff';
+const KEY_IDLE = 'background:rgba(255,255,255,0.1);padding:2px 8px;border-radius:3px;color:rgba(255,255,255,0.3)';
 
 document.addEventListener('keydown', e => {
   keys[e.code] = true;
+  if (keyDebugMap[e.code]) keyDebugMap[e.code].style.cssText = KEY_ACTIVE;
   // Auto-request pointer lock on WASD if not locked
   if (!locked && !inVR && ['KeyW','KeyA','KeyS','KeyD'].includes(e.code)) {
     renderer.domElement.requestPointerLock();
   }
 });
-document.addEventListener('keyup', e => { keys[e.code] = false; });
+document.addEventListener('keyup', e => {
+  keys[e.code] = false;
+  if (keyDebugMap[e.code]) keyDebugMap[e.code].style.cssText = KEY_IDLE;
+});
 
 // Click anywhere on body to request pointer lock (not just canvas)
 document.body.addEventListener('click', (e) => {
@@ -581,10 +616,21 @@ document.addEventListener('mousemove', e => {
 });
 
 // ── Collision check ────────────────────────────────────────────────
-function checkCollision(x, z) {
+// Returns true if point (x,z) is inside any building AABB + margin.
+// If allowEscape is true and origin is ALREADY inside a building,
+// movement OUT of that building is permitted (standard de-trap).
+function checkCollision(x, z, originX, originZ) {
   for (const b of buildingBoxes) {
-    if (x > b.min.x - COLLISION_MARGIN && x < b.max.x + COLLISION_MARGIN &&
-        z > b.min.z - COLLISION_MARGIN && z < b.max.z + COLLISION_MARGIN) return true;
+    const inBox = x > b.min.x - COLLISION_MARGIN && x < b.max.x + COLLISION_MARGIN &&
+                  z > b.min.z - COLLISION_MARGIN && z < b.max.z + COLLISION_MARGIN;
+    if (!inBox) continue;
+    // If origin is also inside this same box, allow escape (don't block)
+    if (originX !== undefined && originZ !== undefined) {
+      const originInBox = originX > b.min.x - COLLISION_MARGIN && originX < b.max.x + COLLISION_MARGIN &&
+                          originZ > b.min.z - COLLISION_MARGIN && originZ < b.max.z + COLLISION_MARGIN;
+      if (originInBox) continue; // Already inside — let player move out
+    }
+    return true;
   }
   return false;
 }
@@ -640,10 +686,11 @@ function updateVRLocomotion(dt) {
         const fwd = new THREE.Vector3(-Math.sin(vrYaw), 0, -Math.cos(vrYaw));
         const right = new THREE.Vector3(Math.cos(vrYaw), 0, -Math.sin(vrYaw));
         const move = fwd.multiplyScalar(-ay * VR_MOVE_SPEED * dt).add(right.multiplyScalar(ax * VR_MOVE_SPEED * dt));
-        const nx = vrCamGroup.position.x + move.x, nz = vrCamGroup.position.z + move.z;
+        const vcx = vrCamGroup.position.x, vcz = vrCamGroup.position.z;
+        const nx = vcx + move.x, nz = vcz + move.z;
         const half = GROUND_SIZE / 2;
-        if (!checkCollision(nx, vrCamGroup.position.z) && Math.abs(nx) < half) vrCamGroup.position.x = nx;
-        if (!checkCollision(vrCamGroup.position.x, nz) && Math.abs(nz) < half) vrCamGroup.position.z = nz;
+        if (!checkCollision(nx, vcz, vcx, vcz) && Math.abs(nx) < half) vrCamGroup.position.x = nx;
+        if (!checkCollision(vrCamGroup.position.x, nz, vcx, vcz) && Math.abs(nz) < half) vrCamGroup.position.z = nz;
       }
     }
     if (source.handedness === 'right' && axes.length >= 4) {
@@ -819,13 +866,14 @@ renderer.setAnimationLoop((timestamp, xrFrame) => {
     if (keys['KeyA']) move.sub(right);
     if (move.lengthSq() > 0) move.normalize().multiplyScalar(speed * dt);
 
-    const newX = camera.position.x + move.x;
-    const newZ = camera.position.z + move.z;
+    const curX = camera.position.x, curZ = camera.position.z;
+    const newX = curX + move.x;
+    const newZ = curZ + move.z;
     const half = GROUND_SIZE / 2;
 
-    // Collision + bounds
-    if (!checkCollision(newX, camera.position.z) && Math.abs(newX) < half) camera.position.x = newX;
-    if (!checkCollision(camera.position.x, newZ) && Math.abs(newZ) < half) camera.position.z = newZ;
+    // Collision + bounds (pass origin to allow escape from inside buildings)
+    if (!checkCollision(newX, curZ, curX, curZ) && Math.abs(newX) < half) camera.position.x = newX;
+    if (!checkCollision(camera.position.x, newZ, curX, curZ) && Math.abs(newZ) < half) camera.position.z = newZ;
     camera.position.y = CAM_HEIGHT;
 
     // Camera rotation
