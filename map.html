@@ -103,6 +103,19 @@
   #info-close { position:absolute;top:10px;right:14px;background:none;border:none;color:#fff;font-size:22px;cursor:pointer; }
   #info-close:hover { color:#da251d; }
   #sound-btn { position:fixed;top:56px;right:16px;z-index:50;padding:6px 12px;background:rgba(0,0,0,0.5);color:#fff;border:1px solid rgba(255,255,255,0.2);border-radius:6px;cursor:pointer;font-size:12px; }
+  #poi-proximity { position:fixed;bottom:140px;left:50%;transform:translateX(-50%);z-index:55;color:#fff;font-size:15px;text-align:center;text-shadow:0 1px 4px #000;background:rgba(0,0,0,0.55);backdrop-filter:blur(4px);padding:8px 20px;border-radius:8px;border:1px solid rgba(255,255,255,0.15);display:none;pointer-events:none; }
+  #poi-counter { position:fixed;top:56px;left:16px;z-index:50;color:#FFD700;font-size:12px;background:rgba(0,0,0,0.5);padding:4px 10px;border-radius:6px;border:1px solid rgba(255,215,0,0.2); }
+  #poi-discovery { position:fixed;top:30%;left:50%;transform:translateX(-50%);z-index:180;color:#FFD700;font-size:22px;font-weight:bold;text-align:center;text-shadow:0 2px 8px rgba(0,0,0,0.8);pointer-events:none;display:none;transition:opacity 0.5s; }
+  #poi-discovery small { font-size:14px;color:rgba(255,255,255,0.7);font-weight:normal; }
+  #poi-info { position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:160;display:none;background:rgba(10,10,30,0.92);backdrop-filter:blur(12px);border:2px solid #da251d;border-radius:14px;padding:24px 32px;color:#fff;max-width:440px;min-width:300px;text-align:center; }
+  #poi-info .poi-title { font-size:20px;font-weight:bold;color:#FFD700;margin-bottom:2px; }
+  #poi-info .poi-title-vi { font-size:14px;color:rgba(255,255,255,0.5);margin-bottom:12px;font-style:italic; }
+  #poi-info .poi-desc { font-size:14px;line-height:1.7;margin-bottom:8px; }
+  #poi-info .poi-desc-vi { font-size:12px;color:rgba(255,255,255,0.45);line-height:1.5;margin-bottom:10px;font-style:italic; }
+  #poi-info .poi-cat { font-size:11px;color:#da251d;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px; }
+  #poi-info .poi-dist { font-size:12px;color:rgba(255,255,255,0.5); }
+  #poi-info .poi-close { font-size:11px;color:rgba(255,255,255,0.35);margin-top:8px; }
+  #poi-distances { position:fixed;top:145px;right:20px;z-index:50;font-size:11px;text-align:right;pointer-events:none;line-height:1.6; }
 </style>
 </head>
 <body>
@@ -131,6 +144,19 @@
 <div id="photo-prompt">Press F to take photo</div>
 <div id="photo-toast"></div>
 <div id="achieve-popup"></div>
+<div id="poi-proximity"></div>
+<div id="poi-counter">🏛️ Discovered: 0/6</div>
+<div id="poi-discovery"></div>
+<div id="poi-info">
+  <div class="poi-cat"></div>
+  <div class="poi-title"></div>
+  <div class="poi-title-vi"></div>
+  <div class="poi-desc"></div>
+  <div class="poi-desc-vi"></div>
+  <div class="poi-dist"></div>
+  <div class="poi-close">Click or press E to close</div>
+</div>
+<div id="poi-distances"></div>
 <button id="sound-btn">🔊 Sound: OFF</button>
 <button id="info-btn">Area Info</button>
 <div id="info-overlay">
@@ -147,6 +173,7 @@
 <button id="vr-btn">Enter VR</button>
 
 <script src="map-systems.js"></script>
+<script src="landmarks.js"></script>
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.163.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.163.0/examples/jsm/"}}</script>
 <script type="module">
 import * as THREE from 'three';
@@ -599,6 +626,12 @@ const collectibles = MS.createCollectibles(THREE, scene, latLonToXZ);
 const photoSpots = MS.createPhotoSpots(THREE, scene, latLonToXZ);
 MS.initEvents(renderer);
 
+// ── Initialize Landmarks (POIs & Vietnamese Cultural Elements) ────
+const LM = window.Landmarks;
+const poiMarkers = LM.createPOIMarkers(THREE, scene, latLonToXZ);
+LM.setupInteraction(THREE, camera, poiMarkers, renderer);
+LM.initAmbience();
+
 // ── Minimap + Compass ──────────────────────────────────────────────
 const mmCanvas = document.getElementById('minimap');
 const mm = mmCanvas.getContext('2d');
@@ -639,6 +672,8 @@ function drawMinimap() {
     mm.fillStyle = '#' + c.def.color.toString(16).padStart(6, '0');
     mm.beginPath(); mm.arc(p.mx, p.my, 1.5, 0, Math.PI * 2); mm.fill();
   });
+  // POI markers (diamonds)
+  LM.drawPOIsOnMinimap(mm, poiMarkers, worldToMM);
   // Player triangle indicating direction
   const pp = worldToMM(camera.position.x, camera.position.z);
   mm.save(); mm.translate(pp.mx, pp.my); mm.rotate(-yaw);
@@ -757,6 +792,11 @@ renderer.setAnimationLoop(() => {
     MS.updateNPCs(npcs, dt, clock.elapsedTime, camera, renderer);
     MS.updatePhotoSpots(photoSpots, clock.elapsedTime, camera);
     MS.updateCollectibles(collectibles, dt, clock.elapsedTime, camera, scene);
+    // Landmarks updates
+    const nearestPOI = LM.updateMarkers(poiMarkers, dt, clock.elapsedTime, camera);
+    LM.handleProximity(nearestPOI, dt);
+    LM.updateAmbience(camera.position.x, camera.position.z, poiMarkers);
+    LM.updateDistanceIndicators(poiMarkers, camera);
     drawMinimap();
     drawCompass();
   } else {
