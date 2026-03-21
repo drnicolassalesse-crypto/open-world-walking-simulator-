@@ -90,6 +90,7 @@
   <span class="label">LON</span> <span id="hud-lon">106.7219</span><br>
   <span class="label">DIR</span> <span id="hud-dir">N</span><br>
   <span class="label">BLDG</span> <span id="hud-bldg">0</span><br>
+  <span class="label">TIME</span> <span id="hud-time">7:00 AM</span><br>
   <span id="hud-photos">📸 Photos: 0/3</span><br>
   <a href="index.html">← Back to main game</a>
 </div>
@@ -151,6 +152,80 @@ sun.shadow.camera.left = -600; sun.shadow.camera.right = 600;
 sun.shadow.camera.top = 600; sun.shadow.camera.bottom = -600;
 sun.shadow.camera.far = 1200;
 scene.add(sun);
+const ambLight = scene.children.find(c => c.isAmbientLight);
+
+// ── Day-Night Cycle ────────────────────────────────────────────────
+let gameMinutes = 7 * 60; // start at 7:00 AM (minutes since midnight)
+const hudTime = document.getElementById('hud-time');
+
+// Landmark 81 night glow light (off by default)
+const towerGlow = new THREE.PointLight(0xffd700, 0, 200);
+towerGlow.position.set(0, 300, 0);
+scene.add(towerGlow);
+
+// Star field canvas as scene background at night
+const starCanvas = document.createElement('canvas'); starCanvas.width = 512; starCanvas.height = 512;
+const starCtx = starCanvas.getContext('2d');
+const starDots = Array.from({ length: 50 }, () => ({ x: Math.random() * 512, y: Math.random() * 512, r: Math.random() * 1.5 + 0.5 }));
+const starTex = new THREE.CanvasTexture(starCanvas);
+
+function lerpColor(a, b, t) {
+  const ar = (a >> 16) & 0xff, ag = (a >> 8) & 0xff, ab = a & 0xff;
+  const br = (b >> 16) & 0xff, bg = (b >> 8) & 0xff, bb = b & 0xff;
+  const r = Math.round(ar + (br - ar) * t), g = Math.round(ag + (bg - ag) * t), bl = Math.round(ab + (bb - ab) * t);
+  return (r << 16) | (g << 8) | bl;
+}
+
+function updateDayNight(dt) {
+  gameMinutes += dt; // 1 real second = 1 game minute
+  if (gameMinutes >= 1440) gameMinutes -= 1440;
+  const h = gameMinutes / 60; // fractional hour
+
+  // Time display
+  const hr = Math.floor(gameMinutes) % 1440;
+  const hh = Math.floor(hr / 60), mm = Math.floor(hr % 60);
+  const ampm = hh >= 12 ? 'PM' : 'AM';
+  const h12 = hh === 0 ? 12 : hh > 12 ? hh - 12 : hh;
+  hudTime.textContent = `${h12}:${String(mm).padStart(2, '0')} ${ampm}`;
+
+  let skyColor, fogColor, ambInt, sunInt, isNight = false;
+  if (h >= 6 && h < 7) { // Dawn
+    const t = h - 6;
+    skyColor = lerpColor(0x1a1a3e, 0xe87040, t);
+    fogColor = lerpColor(0x2a2a4e, 0xd08050, t);
+    ambInt = 0.3 + t * 0.3; sunInt = 0.3 + t * 0.7;
+  } else if (h >= 7 && h < 17) { // Day
+    skyColor = 0x87ceeb; fogColor = 0xc8d8e8; ambInt = 0.6; sunInt = 1.0;
+  } else if (h >= 17 && h < 19) { // Sunset
+    const t = (h - 17) / 2;
+    skyColor = lerpColor(0x87ceeb, 0xc04020, t);
+    fogColor = lerpColor(0xc8d8e8, 0xc07040, t);
+    ambInt = 0.6 - t * 0.3; sunInt = 1.0 - t * 0.6;
+  } else if (h >= 19 && h < 20) { // Dusk
+    const t = h - 19;
+    skyColor = lerpColor(0xc04020, 0x1a1a3e, t);
+    fogColor = lerpColor(0xc07040, 0x2a2a4e, t);
+    ambInt = 0.3 - t * 0.15; sunInt = 0.4 - t * 0.3;
+  } else { // Night
+    skyColor = 0x0a0a2e; fogColor = 0x1a1a2e; ambInt = 0.15; sunInt = 0.1; isNight = true;
+  }
+
+  scene.background.setHex(skyColor);
+  scene.fog.color.setHex(fogColor);
+  ambLight.intensity = ambInt;
+  sun.intensity = sunInt;
+  towerGlow.intensity = isNight ? 3 : 0;
+
+  // Draw stars on background when night
+  if (isNight) {
+    starCtx.fillStyle = '#' + skyColor.toString(16).padStart(6, '0');
+    starCtx.fillRect(0, 0, 512, 512);
+    starCtx.fillStyle = '#fff';
+    starDots.forEach(s => { starCtx.beginPath(); starCtx.arc(s.x, s.y, s.r, 0, Math.PI * 2); starCtx.fill(); });
+    starTex.needsUpdate = true;
+    scene.background = starTex;
+  }
+}
 
 // ── Ground plane with OSM tiles ────────────────────────────────────
 const groundGeo = new THREE.PlaneGeometry(GROUND_SIZE, GROUND_SIZE);
@@ -588,6 +663,7 @@ const clock = new THREE.Clock();
 
 renderer.setAnimationLoop(() => {
   const dt = Math.min(clock.getDelta(), 0.1);
+  updateDayNight(dt);
 
   if (!inVR) {
     // Movement
