@@ -360,28 +360,33 @@ const cameraRig = new THREE.Group();
 cameraRig.add(new THREE.PerspectiveCamera()); // placeholder, replaced below
 
 // VR controllers
-const controllerModelFactory = new XRControllerModelFactory();
+let controllerModelFactory = null;
+try { controllerModelFactory = new XRControllerModelFactory(); } catch(e) { console.warn('XRControllerModelFactory not available:', e); }
 let controller0, controller1, grip0, grip1;
 let vrTurnCooldown = 0;
 let vrSmoothMove = false; // false=teleport-style snap, true=smooth locomotion
 let vrSettingsVisible = false;
 
 function setupVRControllers() {
-  controller0 = renderer.xr.getController(0);
-  controller1 = renderer.xr.getController(1);
-  grip0 = renderer.xr.getControllerGrip(0);
-  grip1 = renderer.xr.getControllerGrip(1);
-  grip0.add(controllerModelFactory.createControllerModel(grip0));
-  grip1.add(controllerModelFactory.createControllerModel(grip1));
-  cameraRig.add(controller0, controller1, grip0, grip1);
+  try {
+    controller0 = renderer.xr.getController(0);
+    controller1 = renderer.xr.getController(1);
+    grip0 = renderer.xr.getControllerGrip(0);
+    grip1 = renderer.xr.getControllerGrip(1);
+    if (controllerModelFactory) {
+      grip0.add(controllerModelFactory.createControllerModel(grip0));
+      grip1.add(controllerModelFactory.createControllerModel(grip1));
+    }
+    cameraRig.add(controller0, controller1, grip0, grip1);
 
-  // Visual ray for each controller
-  const lineGeo = new THREE.BufferGeometry().setFromPoints([
-    new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-3)
-  ]);
-  const lineMat = new THREE.LineBasicMaterial({ color: 0x4488ff, transparent: true, opacity: 0.5 });
-  controller0.add(new THREE.Line(lineGeo.clone(), lineMat.clone()));
-  controller1.add(new THREE.Line(lineGeo.clone(), lineMat.clone()));
+    // Visual ray for each controller
+    const lineGeo = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-3)
+    ]);
+    const lineMat = new THREE.LineBasicMaterial({ color: 0x4488ff, transparent: true, opacity: 0.5 });
+    controller0.add(new THREE.Line(lineGeo.clone(), lineMat.clone()));
+    controller1.add(new THREE.Line(lineGeo.clone(), lineMat.clone()));
+  } catch(e) { console.warn('VR controller setup skipped:', e); }
 }
 
 // VR Settings panel (3D floating)
@@ -496,11 +501,12 @@ function getVRGripPressed() {
 // ── Scene ──────────────────────────────────────────────────────────
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87CEEB);
+renderer.setClearColor(0x87CEEB);
 scene.fog = new THREE.FogExp2(0xC8DFF0, 0.0018);
 
 // ── Camera ─────────────────────────────────────────────────────────
 const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 2000);
-camera.position.set(0, 20, 0);
+camera.position.set(0, 50, 0);
 
 // Replace placeholder camera in rig with actual camera
 cameraRig.remove(cameraRig.children[0]);
@@ -865,6 +871,15 @@ function generateTerrain() {
 
 const terrain = generateTerrain();
 scene.add(terrain);
+
+// Guaranteed floor fallback — visible green plane at y=0 in case terrain is invisible
+const fallbackFloorGeo = new THREE.BoxGeometry(100, 1, 100);
+const fallbackFloorMat = new THREE.MeshStandardMaterial({ color: 0x3a7d44 });
+const fallbackFloor = new THREE.Mesh(fallbackFloorGeo, fallbackFloorMat);
+fallbackFloor.position.set(0, 0, 0);
+fallbackFloor.receiveShadow = true;
+scene.add(fallbackFloor);
+
 scene.add(cameraRig);
 
 // ── Water Plane ─────────────────────────────────────────────────────
