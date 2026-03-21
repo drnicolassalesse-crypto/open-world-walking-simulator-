@@ -34,13 +34,25 @@
   }
   #loading {
     position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-    background: rgba(0,0,0,0.8); z-index: 100;
+    background: #0a0a1e; z-index: 200;
     display: flex; align-items: center; justify-content: center;
-    flex-direction: column; color: #fff; font-size: 18px;
+    flex-direction: column; color: #fff; font-size: 18px; transition: opacity 0.8s;
   }
   #loading .spinner { width: 40px; height: 40px; border: 3px solid rgba(255,255,255,0.2); border-top-color: #7ec8e3; border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 16px; }
   @keyframes spin { to { transform: rotate(360deg); } }
   #loading .sub { font-size: 12px; color: rgba(255,255,255,0.5); margin-top: 8px; }
+  #loading .flag { color: #da251d; font-size: 22px; font-weight: bold; margin-top: 14px; letter-spacing: 4px; }
+  #loading .flag-emoji { font-size: 28px; margin-top: 6px; }
+  #load-bar-wrap { width: 200px; height: 4px; background: rgba(255,255,255,0.15); border-radius: 2px; margin-top: 14px; }
+  #load-bar { width: 0%; height: 100%; background: #da251d; border-radius: 2px; transition: width 0.3s; }
+  #welcome {
+    position: fixed; top: 35%; left: 50%; transform: translate(-50%,-50%); z-index: 150;
+    background: rgba(0,0,0,0.75); backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 12px; padding: 24px 36px; color: #fff; text-align: center;
+    display: none; transition: opacity 0.5s;
+  }
+  #welcome h3 { color: #FFD700; font-size: 18px; margin-bottom: 10px; }
+  #welcome p { font-size: 13px; line-height: 1.7; color: rgba(255,255,255,0.8); margin: 0; }
   #vr-btn {
     position: fixed; bottom: 20px; right: 20px; z-index: 50;
     padding: 10px 20px; background: rgba(0,0,0,0.6); color: #fff;
@@ -90,10 +102,12 @@
   #info-panel .fact em { color:rgba(255,255,255,0.5);font-style:normal;font-size:12px; }
   #info-close { position:absolute;top:10px;right:14px;background:none;border:none;color:#fff;font-size:22px;cursor:pointer; }
   #info-close:hover { color:#da251d; }
+  #sound-btn { position:fixed;top:56px;right:16px;z-index:50;padding:6px 12px;background:rgba(0,0,0,0.5);color:#fff;border:1px solid rgba(255,255,255,0.2);border-radius:6px;cursor:pointer;font-size:12px; }
 </style>
 </head>
 <body>
-<div id="loading"><div class="spinner"></div>Loading buildings...<div class="sub">Fetching OpenStreetMap data</div></div>
+<div id="loading"><div class="spinner"></div>Loading Landmark 81 Area...<div class="sub">Fetching OpenStreetMap data</div><div id="load-bar-wrap"><div id="load-bar"></div></div><div class="flag">VIETNAM</div><div class="flag-emoji">🇻🇳</div></div>
+<div id="welcome"><h3>Welcome to Landmark 81, Ho Chi Minh City!</h3><p>WASD to move, mouse to look, E to talk to NPCs<br>Collect items, take photos, earn score!</p></div>
 <div id="title">Landmark 81 Area — Ho Chi Minh City<small>Click to explore · WASD to move · Shift to sprint</small></div>
 <div id="crosshair"></div>
 <div id="hud">
@@ -117,6 +131,7 @@
 <div id="photo-prompt">Press F to take photo</div>
 <div id="photo-toast"></div>
 <div id="achieve-popup"></div>
+<button id="sound-btn">🔊 Sound: OFF</button>
 <button id="info-btn">Area Info</button>
 <div id="info-overlay">
   <div id="info-panel">
@@ -268,7 +283,7 @@ let weatherIdx = 0, weatherTimer = 0;
 
 function updateWeather(dt) {
   weatherTimer += dt;
-  if (weatherTimer >= weatherCycle[weatherIdx].dur) { weatherTimer = 0; weatherIdx = (weatherIdx + 1) % weatherCycle.length; hudWeather.textContent = weatherCycle[weatherIdx].icon + ' ' + weatherCycle[weatherIdx].name; }
+  if (weatherTimer >= weatherCycle[weatherIdx].dur) { weatherTimer = 0; weatherIdx = (weatherIdx + 1) % weatherCycle.length; hudWeather.textContent = weatherCycle[weatherIdx].icon + ' ' + weatherCycle[weatherIdx].name; if (typeof updateAudioWeather === 'function') updateAudioWeather(weatherIdx); }
   const wc = weatherCycle[weatherIdx]; rainMesh.visible = wc.count > 0;
   if (!rainMesh.visible) { scene.fog.density = 0.0008; return; }
   const pos = rainGeo.attributes.position.array, cx = camera.position.x, cz = camera.position.z;
@@ -384,7 +399,21 @@ function addFallbacks() {
 let buildingCount = 0;
 const hudBldg = document.getElementById('hud-bldg');
 const loadingEl = document.getElementById('loading');
+const loadBar = document.getElementById('load-bar');
+const welcomeEl = document.getElementById('welcome');
 const errorMsg = document.getElementById('error-msg');
+let loadDismissed = false;
+
+function dismissLoading() {
+  if (loadDismissed) return; loadDismissed = true;
+  loadBar.style.width = '100%';
+  setTimeout(() => { loadingEl.style.opacity = '0'; }, 300);
+  setTimeout(() => { loadingEl.style.display = 'none'; welcomeEl.style.display = 'block'; welcomeEl.style.opacity = '1'; }, 1100);
+  setTimeout(() => { welcomeEl.style.opacity = '0'; }, 4100);
+  setTimeout(() => { welcomeEl.style.display = 'none'; }, 4600);
+}
+// Fallback: dismiss after 3 seconds even if fetch is slow
+setTimeout(dismissLoading, 3000);
 
 (async function fetchOSMBuildings() {
   const overpassUrl = 'https://overpass-api.de/api/interpreter';
@@ -440,11 +469,13 @@ const errorMsg = document.getElementById('error-msg');
           max: { x: Math.max(...xs), z: Math.max(...zs) }
         });
         buildingCount++;
+        if (buildingCount % 20 === 0) loadBar.style.width = Math.min(75, buildingCount / 2) + '%';
       } catch (e) { /* skip malformed polygon */ }
     });
 
     hudBldg.textContent = buildingCount;
-    loadingEl.style.display = 'none';
+    loadBar.style.width = '80%';
+    dismissLoading();
   } catch (err) {
     console.warn('Overpass API failed:', err);
     errorMsg.textContent = 'OSM data unavailable — showing key landmarks only';
@@ -452,7 +483,7 @@ const errorMsg = document.getElementById('error-msg');
     addFallbacks();
     buildingCount = fallbackBuildings.length;
     hudBldg.textContent = buildingCount + ' (fallback)';
-    loadingEl.style.display = 'none';
+    dismissLoading();
   }
 })();
 
@@ -629,6 +660,59 @@ function drawCompass() {
   comp.fillStyle = '#fff'; comp.beginPath(); comp.arc(0, 0, 2, 0, Math.PI * 2); comp.fill();
   comp.restore();
 }
+
+// ── Procedural Ambient Sound System ────────────────────────────────
+let audioCtx = null, masterGain = null, cityGain, windGain, rainGain, rainSource;
+let soundOn = false, audioInited = false;
+const soundBtn = document.getElementById('sound-btn');
+
+function initAudio() {
+  if (audioInited) return;
+  audioInited = true;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  masterGain = audioCtx.createGain(); masterGain.gain.value = 1; masterGain.connect(audioCtx.destination);
+  // City hum: 60Hz sawtooth
+  const cityOsc = audioCtx.createOscillator(); cityOsc.type = 'sawtooth'; cityOsc.frequency.value = 60;
+  cityGain = audioCtx.createGain(); cityGain.gain.value = 0.02;
+  cityOsc.connect(cityGain); cityGain.connect(masterGain); cityOsc.start();
+  // Wind: 180Hz triangle with LFO
+  const windOsc = audioCtx.createOscillator(); windOsc.type = 'triangle'; windOsc.frequency.value = 180;
+  const lfo = audioCtx.createOscillator(); lfo.frequency.value = 0.5;
+  const lfoGain = audioCtx.createGain(); lfoGain.gain.value = 20;
+  lfo.connect(lfoGain); lfoGain.connect(windOsc.frequency); lfo.start();
+  windGain = audioCtx.createGain(); windGain.gain.value = 0.01;
+  windOsc.connect(windGain); windGain.connect(masterGain); windOsc.start();
+  // Rain: white noise buffer (looping)
+  const bufSize = audioCtx.sampleRate * 2, buf = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < bufSize; i++) data[i] = Math.random() * 2 - 1;
+  rainSource = audioCtx.createBufferSource(); rainSource.buffer = buf; rainSource.loop = true;
+  rainGain = audioCtx.createGain(); rainGain.gain.value = 0;
+  rainSource.connect(rainGain); rainGain.connect(masterGain); rainSource.start();
+  soundOn = true; soundBtn.textContent = '🔊 Sound: ON';
+}
+
+function updateAudioWeather(weatherIndex) {
+  if (!audioCtx || !soundOn) return;
+  const gains = [0, 0.05, 0.1]; // clear, light rain, heavy rain
+  rainGain.gain.setTargetAtTime(gains[weatherIndex] || 0, audioCtx.currentTime, 0.3);
+}
+
+soundBtn.addEventListener('click', () => {
+  if (!audioInited) { initAudio(); return; }
+  soundOn = !soundOn;
+  masterGain.gain.value = soundOn ? 1 : 0;
+  soundBtn.textContent = soundOn ? '🔊 Sound: ON' : '🔇 Sound: OFF';
+});
+
+// Start audio on first interaction (autoplay policy)
+function firstInteraction() {
+  if (!audioInited) initAudio();
+  document.removeEventListener('click', firstInteraction);
+  document.removeEventListener('keydown', firstInteraction);
+}
+document.addEventListener('click', firstInteraction);
+document.addEventListener('keydown', firstInteraction);
 
 // ── Game loop ──────────────────────────────────────────────────────
 const clock = new THREE.Clock();
