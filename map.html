@@ -94,6 +94,7 @@
   <span class="label">SKY</span> <span id="hud-weather">☀️ Clear</span><br>
   <span id="hud-items">🌿 Items: 0/8</span> · <span id="hud-photos">📸 Photos: 0/3</span><br>
   <a href="index.html">← Back to main game</a>
+  <div id="hud-vr" style="display:none;color:#7ec8e3;margin-top:4px;font-weight:bold">🥽 VR Mode Active</div>
 </div>
 <div id="error-msg"></div>
 <div id="npc-dialog"><div class="npc-name" id="npc-name"></div><div class="npc-msg" id="npc-msg"></div><div class="dismiss">Click or press E to dismiss</div></div>
@@ -523,6 +524,12 @@ function getCompass(yawVal) {
 
 // ── WebXR VR ───────────────────────────────────────────────────────
 let inVR = false;
+const hudVR = document.getElementById('hud-vr');
+const vrCamGroup = new THREE.Group(); // dolly for VR locomotion
+vrCamGroup.add(camera);
+scene.add(vrCamGroup);
+let vrYaw = 0;
+
 if (navigator.xr) {
   navigator.xr.isSessionSupported('immersive-vr').then(ok => {
     if (!ok) return;
@@ -531,11 +538,44 @@ if (navigator.xr) {
     btn.addEventListener('click', () => {
       navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor'] }).then(session => {
         renderer.xr.setSession(session);
-        inVR = true;
-        session.addEventListener('end', () => { inVR = false; });
+        inVR = true; hudVR.style.display = 'block';
+        vrYaw = yaw; // inherit current facing
+        vrCamGroup.position.copy(camera.position);
+        vrCamGroup.position.y = 0;
+        session.addEventListener('end', () => { inVR = false; hudVR.style.display = 'none'; });
       });
     });
   });
+}
+
+// VR gamepad locomotion: left stick = move, right stick = rotate
+const VR_MOVE_SPEED = 2, VR_ROT_SPEED = Math.PI / 3; // 60 deg/s
+function updateVRLocomotion(dt) {
+  const session = renderer.xr.getSession();
+  if (!session) return;
+  for (const source of session.inputSources) {
+    if (!source.gamepad) continue;
+    const axes = source.gamepad.axes;
+    if (source.handedness === 'left' && axes.length >= 4) {
+      const ax = axes[2] || 0, ay = axes[3] || 0;
+      if (Math.abs(ax) > 0.1 || Math.abs(ay) > 0.1) {
+        const fwd = new THREE.Vector3(-Math.sin(vrYaw), 0, -Math.cos(vrYaw));
+        const right = new THREE.Vector3(Math.cos(vrYaw), 0, -Math.sin(vrYaw));
+        const move = fwd.multiplyScalar(-ay * VR_MOVE_SPEED * dt).add(right.multiplyScalar(ax * VR_MOVE_SPEED * dt));
+        const nx = vrCamGroup.position.x + move.x, nz = vrCamGroup.position.z + move.z;
+        const half = GROUND_SIZE / 2;
+        if (!checkCollision(nx, vrCamGroup.position.z) && Math.abs(nx) < half) vrCamGroup.position.x = nx;
+        if (!checkCollision(vrCamGroup.position.x, nz) && Math.abs(nz) < half) vrCamGroup.position.z = nz;
+      }
+    }
+    if (source.handedness === 'right' && axes.length >= 4) {
+      const rx = axes[2] || 0;
+      if (Math.abs(rx) > 0.1) {
+        vrYaw -= rx * VR_ROT_SPEED * dt;
+        vrCamGroup.rotation.y = vrYaw;
+      }
+    }
+  }
 }
 
 // ── Resize ─────────────────────────────────────────────────────────
@@ -824,6 +864,8 @@ renderer.setAnimationLoop(() => {
     updateCollectibles(dt);
     drawMinimap();
     drawCompass();
+  } else {
+    updateVRLocomotion(dt);
   }
 
   renderer.render(scene, camera);
