@@ -2152,7 +2152,20 @@ const velocity = new THREE.Vector3();
 const direction = new THREE.Vector3();
 const euler = new THREE.Euler(0, 0, 0, 'YXZ');
 
-// Pointer lock
+// Pointer lock — blocker click handler (primary entry point)
+blocker.addEventListener('click', () => {
+  if (inVR) return;
+  renderer.domElement.requestPointerLock();
+});
+
+// Fallback: click anywhere on body to request pointer lock
+document.body.addEventListener('click', (e) => {
+  if (inVR || isLocked || gamePaused) return;
+  if (e.target.closest('#hud, #vr-button, #npc-dialog, #pause-menu, #settings-panel, #inventory-panel, #quest-log, #hall-of-fame, #achieve-panel')) return;
+  renderer.domElement.requestPointerLock();
+});
+
+// Canvas click also requests pointer lock (re-lock after ESC)
 renderer.domElement.addEventListener('click', () => {
   renderer.domElement.requestPointerLock();
 });
@@ -2194,7 +2207,7 @@ document.addEventListener('keydown', (e) => {
   if (e.code === 'KeyI') { toggleInventory(); return; }
   if (e.code === 'KeyQ') { toggleQuestLog(); return; }
   if (e.code === 'KeyM') { toggleMute(); return; }
-  if (e.code === 'KeyA' && (gamePaused || !isLocked || achOpen)) { toggleAchievements(); return; }
+  if (e.code === 'KeyA' && (gamePaused || achOpen)) { toggleAchievements(); return; }
   if (e.code === 'KeyH') { toggleHOF(); return; }
   if (e.code === 'Escape' && achOpen) { toggleAchievements(); return; }
   if (e.code === 'Escape' && hofOpen) { toggleHOF(); return; }
@@ -2209,6 +2222,10 @@ document.addEventListener('keydown', (e) => {
   }
   if (gamePaused) return;
   keys[e.code] = true;
+  // Auto-request pointer lock on WASD if not locked
+  if (!isLocked && !inVR && ['KeyW','KeyA','KeyS','KeyD'].includes(e.code)) {
+    renderer.domElement.requestPointerLock();
+  }
   if (e.code === 'KeyE' && nearestResource && !dialogOpen && inventory.length < MAX_INV) {
     nearestResource.collected = true; nearestResource.mesh.visible = false; nearestResource.respawnTimer = 60;
     addToInventory(nearestResource.type); nearestResource = null;
