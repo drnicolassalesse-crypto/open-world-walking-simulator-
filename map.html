@@ -66,6 +66,16 @@
     text-shadow: 0 1px 3px rgba(0,0,0,0.8); pointer-events: none;
     transform: translate(-50%, -100%); white-space: nowrap;
   }
+  #minimap {
+    position: fixed; top: 16px; right: 16px; z-index: 50; width: 120px; height: 120px;
+    border: 2px solid rgba(255,255,255,0.25); border-radius: 8px;
+    background: rgba(0,0,0,0.5); pointer-events: none;
+  }
+  #compass {
+    position: fixed; top: 16px; left: 16px; z-index: 50; width: 50px; height: 50px;
+    pointer-events: none; color: #fff; font-size: 11px; font-weight: bold;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+  }
 </style>
 </head>
 <body>
@@ -82,6 +92,8 @@
 <div id="error-msg"></div>
 <div id="npc-dialog"><div class="npc-name" id="npc-name"></div><div class="npc-msg" id="npc-msg"></div><div class="dismiss">Click or press E to dismiss</div></div>
 <div id="npc-labels"></div>
+<canvas id="minimap" width="120" height="120"></canvas>
+<canvas id="compass" width="50" height="50"></canvas>
 <button id="vr-btn">Enter VR</button>
 
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.163.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.163.0/examples/jsm/"}}</script>
@@ -469,6 +481,61 @@ function updateNPCLabels() {
   });
 }
 
+// ── Minimap + Compass ──────────────────────────────────────────────
+const mmCanvas = document.getElementById('minimap');
+const mm = mmCanvas.getContext('2d');
+const compCanvas = document.getElementById('compass');
+const comp = compCanvas.getContext('2d');
+const MM = 120, HALF = GROUND_SIZE / 2; // minimap size, world half-extent
+function worldToMM(x, z) { return { mx: (x / HALF + 1) * MM / 2, my: (z / HALF + 1) * MM / 2 }; }
+
+function drawMinimap() {
+  mm.clearRect(0, 0, MM, MM);
+  mm.fillStyle = '#2a3a2a'; mm.fillRect(0, 0, MM, MM);
+  // Saigon River (curved blue band on east side)
+  const rx = worldToMM(latLonToXZ(CENTER_LAT, 106.7260).x, 0).mx;
+  mm.fillStyle = 'rgba(58,124,165,0.6)';
+  mm.beginPath(); mm.moveTo(rx - 8, 0);
+  mm.quadraticCurveTo(rx + 4, MM * 0.3, rx - 4, MM * 0.5);
+  mm.quadraticCurveTo(rx + 6, MM * 0.7, rx - 6, MM);
+  mm.lineTo(MM, MM); mm.lineTo(MM, 0); mm.closePath(); mm.fill();
+  // Building footprints
+  mm.fillStyle = 'rgba(160,160,160,0.5)';
+  for (const b of buildingBoxes) {
+    const tl = worldToMM(b.min.x, b.min.z), br = worldToMM(b.max.x, b.max.z);
+    mm.fillRect(tl.mx, tl.my, Math.max(br.mx - tl.mx, 1), Math.max(br.my - tl.my, 1));
+  }
+  // Landmark 81 (yellow dot at center)
+  const lm = worldToMM(0, 0);
+  mm.fillStyle = '#FFD700'; mm.beginPath(); mm.arc(lm.mx, lm.my, 3, 0, Math.PI * 2); mm.fill();
+  // NPC dots
+  npcs.forEach(npc => {
+    const p = worldToMM(npc.pos.x, npc.pos.z);
+    mm.fillStyle = '#' + npc.def.color.toString(16).padStart(6, '0');
+    mm.beginPath(); mm.arc(p.mx, p.my, 2, 0, Math.PI * 2); mm.fill();
+  });
+  // Player triangle indicating direction
+  const pp = worldToMM(camera.position.x, camera.position.z);
+  mm.save(); mm.translate(pp.mx, pp.my); mm.rotate(-yaw);
+  mm.fillStyle = '#fff'; mm.beginPath();
+  mm.moveTo(0, -4); mm.lineTo(-3, 3); mm.lineTo(3, 3); mm.closePath(); mm.fill();
+  mm.restore();
+}
+
+function drawCompass() {
+  const S = 50, C = S / 2, R = 18;
+  comp.clearRect(0, 0, S, S);
+  comp.save(); comp.translate(C, C); comp.rotate(yaw);
+  comp.font = 'bold 10px sans-serif'; comp.textAlign = 'center'; comp.textBaseline = 'middle';
+  comp.fillStyle = '#f44'; comp.fillText('N', 0, -R);
+  comp.fillStyle = '#ccc'; comp.fillText('S', 0, R);
+  comp.fillStyle = '#ccc'; comp.fillText('E', R, 0);
+  comp.fillStyle = '#ccc'; comp.fillText('W', -R, 0);
+  // Center dot
+  comp.fillStyle = '#fff'; comp.beginPath(); comp.arc(0, 0, 2, 0, Math.PI * 2); comp.fill();
+  comp.restore();
+}
+
 // ── Game loop ──────────────────────────────────────────────────────
 const clock = new THREE.Clock();
 
@@ -516,6 +583,8 @@ renderer.setAnimationLoop(() => {
     });
     if (nearest && !dialogOpen) showNPCDialog(nearest);
     updateNPCLabels();
+    drawMinimap();
+    drawCompass();
   }
 
   renderer.render(scene, camera);
